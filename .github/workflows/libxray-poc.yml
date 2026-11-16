@@ -1,0 +1,160 @@
+name: libXray Android PoC (Phase 2B)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/libxray-poc.yml"
+      - "scripts/inspect_libxray_aar.sh"
+      - "app/src/main/java/com/onfaa/tunnel/core/xray/**"
+      - "app/src/androidTest/java/com/onfaa/tunnel/core/xray/**"
+      - "docs/LIBXRAY_ANDROID_POC.md"
+
+permissions:
+  contents: read
+
+env:
+  LIBXRAY_REPO: https://github.com/XTLS/libXray.git
+  LIBXRAY_TAG: v26.11.9
+  LIBXRAY_COMMIT: 5a0f7d8d1c28b34afb5727b04b26a10f6dbac7e3
+  XRAY_CORE_TAG: v26.11.9
+  XRAY_CORE_COMMIT: 676eaf66f8f05d4d558ee7a74b4736623d3feeb9
+  NDK_VERSION: r30
+  LIBXRAY_ANDROID_API: "21"
+  # Pinned for reproducibility of gomobile tool resolution (build script resolves LIBXRAY_GOMOBILE_VERSION).
+  LIBXRAY_GOMOBILE_VERSION: v0.0.0-20260217195705-b56b3793a9c4
+  GO_VERSION: "1.26.1"
+
+jobs:
+  build-libxray-and-integrate:
+    name: Build libXray, inspect AAR, integrate and build app
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout ONFAA TUNNEL
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Set up Go (pinned)
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Android NDK (pinned)
+        id: ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: ${{ env.NDK_VERSION }}
+          add-to-path: true
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Clone and verify libXray pinned commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --no-checkout "$LIBXRAY_REPO" /tmp/libXray
+          cd /tmp/libXray
+          git fetch --tags --depth=1 origin "$LIBXRAY_TAG"
+          git checkout "$LIBXRAY_COMMIT"
+          ACTUAL="$(git rev-parse HEAD)"
+          echo "libXray HEAD: $ACTUAL"
+          test "$ACTUAL" = "$LIBXRAY_COMMIT"
+          git --no-pager show -s --format='%H %s' HEAD | tee "$GITHUB_WORKSPACE/libxray-commit.txt"
+
+      - name: Build libXray Android AAR (official script)
+        shell: bash
+        env:
+          ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
+          GOTOOLCHAIN: auto
+        run: |
+          set -euo pipefail
+          cd /tmp/libXray
+          python3 build/main.py android
+          test -f libXray.aar
+          test -f libXray-sources.jar || true
+          ls -lh libXray.aar libXray-sources.jar 2>/dev/null || true
+
+      - name: Inspect AAR and generate PoC report
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x scripts/inspect_libxray_aar.sh
+          ./scripts/inspect_libxray_aar.sh /tmp/libXray/libXray.aar "$GITHUB_WORKSPACE/poc-report"
+          cp /tmp/libXray/libXray.aar "$GITHUB_WORKSPACE/poc-report/libXray.aar"
+          cp /tmp/libXray/libXray-sources.jar "$GITHUB_WORKSPACE/poc-report/libXray-sources.jar" 2>/dev/null || true
+          echo "LIBXRAY_AAR_SHA256=$(cut -d' ' -f1 "$GITHUB_WORKSPACE/poc-report/aar.sha256")" >> "$GITHUB_ENV"
+
+      - name: Integrate verified AAR into :app
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p app/libs
+          cp /tmp/libXray/libXray.aar app/libs/libXray.aar
+          sha256sum app/libs/libXray.aar | tee "$GITHUB_WORKSPACE/poc-report/app-libs-aar.sha256"
+
+      - name: Verify AAR contains native libs and Invoke binding
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s "$GITHUB_WORKSPACE/poc-report/abis.txt" && echo "ABIs detected" || (echo "No ABIs detected" && exit 1)
+          grep -qi "invoke" "$GITHUB_WORKSPACE/poc-report/javap.txt"
+
+      - name: Run app unit tests
+        shell: bash
+        run: ./gradlew :app:testDebugUnitTest --stacktrace
+
+      - name: Assemble debug APK with integrated libXray
+        shell: bash
+        run: ./gradlew :app:assembleDebug --stacktrace
+
+      - name: Assemble androidTest APK (real-artifact instrumented tests compiled)
+        shell: bash
+        run: ./gradlew :app:assembleDebugAndroidTest --stacktrace
+
+      - name: Collect build reports
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/poc-report/gradle"
+          cp -r app/build/reports "$GITHUB_WORKSPACE/poc-report/gradle/reports" 2>/dev/null || true
+          cp -r app/build/test-results "$GITHUB_WORKSPACE/poc-report/gradle/test-results" 2>/dev/null || true
+          {
+            echo "LIBXRAY_TAG=$LIBXRAY_TAG"
+            echo "LIBXRAY_COMMIT=$LIBXRAY_COMMIT"
+            echo "XRAY_CORE_TAG=$XRAY_CORE_TAG"
+            echo "XRAY_CORE_COMMIT=$XRAY_CORE_COMMIT"
+            echo "NDK_VERSION=$NDK_VERSION"
+            echo "LIBXRAY_ANDROID_API=$LIBXRAY_ANDROID_API"
+            echo "LIBXRAY_GOMOBILE_VERSION=$LIBXRAY_GOMOBILE_VERSION"
+            echo "GO_VERSION=$GO_VERSION"
+          } > "$GITHUB_WORKSPACE/poc-report/build-env.txt"
+
+      - name: Upload PoC report and artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: libxray-poc-report
+          path: |
+            poc-report
+            app/build/outputs/apk/debug/*.apk
+            app/build/outputs/apk/androidTest/debug/*.apk
+          if-no-files-found: warn

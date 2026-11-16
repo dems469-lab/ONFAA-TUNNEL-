@@ -57,6 +57,9 @@ android {
 }
 
 dependencies {
+    // Official libXray AAR placed in app/libs by verified build pipeline (Phase 2B PoC).
+    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.aar", "*.jar"))))
+
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.runtime.compose)

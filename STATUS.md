@@ -43,11 +43,16 @@
 - Risque d’intégration multi-runtime Go si d’autres bibliothèques Go étaient ajoutées (voir README libXray).
 - Détails ABI/alignement 16 Ko à confirmer sur binaires réels.
 
+## Phase 2B — PoC d’intégration (préparée, validation CI en attente)
+
+- **Ajouts (dépôt)** : workflow `.github/workflows/libxray-poc.yml` (build officiel libXray depuis commit épinglé, inspection AAR/ABIs/ELF/classes JVM, intégration `app/libs`, build/tests/artefacts), script `scripts/inspect_libxray_aar.sh`, bridge `com.onfaa.tunnel.core.xray.XrayBridge`, tests instrumentés réels `XrayBridgeInstrumentedTest`, documentation `docs/LIBXRAY_ANDROID_POC.md`.
+- **État** : exécution réelle du workflow, SHA-256 de l’AAR, ABIs confirmées, signatures JVM extraites, et résultats de compilation/tests **non encore validés** dans ce rapport tant que le run GitHub Actions n’est pas observé avec succès.
+
 ## Prochaine tâche
 
-1. Définir et exécuter une PoC **reproductible et vérifiée** en CI : récupération du source/artifact libXray v26.11.9 épinglé avec vérification de hash (ou build from source officiel), inspection des ABIs/contenu AAR, puis (si propre) intégration minimale dans `:app` et build CI démontrant l’accessibilité API sans démarrer de tunnel.
-2. Consigner les résultats (preuves, logs, artefacts) et mettre à jour `STATUS.md`/docs ; ne déclarer la Phase 2 terminée que si les critères de validation sont satisfaits.
-3. Préparer la Phase 3 uniquement après validation d’intégration moteur réelle contrôlée.
+1. Vérifier le résultat du workflow `libXray Android PoC (Phase 2B)` (URL run, commit, SHA-256 AAR, ABIs, signatures JVM, tests/build, APK).
+2. Mettre à jour `docs/LIBXRAY_ANDROID_POC.md`, `STATUS.md`, `CHANGELOG.md` avec les preuves réelles ; exécuter/attester les tests instrumentés sur appareil/émulateur si possible (sinon documenter comme non exécutés).
+3. Déclarer la Phase 2 terminée **uniquement** si l’intégration réelle est démontrée par preuves vérifiables ; sinon lister précisément les points non validés.
 
 ## Instructions de reprise pour une autre IA
 

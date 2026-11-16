@@ -35,3 +35,8 @@ secrets.*
 bin/
 gen/
 out/
+
+# Phase 2B PoC artifacts (built/verified in CI, not committed)
+app/libs/*.aar
+app/libs/*.jar
+poc-report/

@@ -6,11 +6,11 @@ Le format s’inspire de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/
 
 ## [Unreleased]
 
-### Phase 2 (audit en cours, non entièrement clôturée)
+### Phase 2 (audit réalisé ; Phase 2B PoC préparée, validation en attente)
 - Audit des sources officielles XTLS/Xray-core v26.11.9 (commit `676eaf66…`, MPL-2.0) et XTLS/libXray v26.11.9 (commit `5a0f7d8…`, MIT), alignement de dépendance vérifié.
-- Ajout de `docs/XRAY_UPSTREAM_AUDIT.md` et `docs/LIBXRAY_API_REFERENCE.md` (API/méthodes vérifiées, stratégie build Android/CI, références).
-- Mises à jour documentation (README, STATUS, ARCHITECTURE, DECISIONS, ROADMAP, BUILD_GUIDE, TEST_PLAN).
-- **Non réalisé** : preuve de concept d’intégration/compilation libXray dans le projet, inspection ABI sur artefact vérifié, validation CI dédiée.
+- Ajout de `docs/XRAY_UPSTREAM_AUDIT.md` et `docs/LIBXRAY_API_REFERENCE.md`.
+- **Phase 2B (préparation)** : workflow `libxray-poc.yml` (build officiel depuis source épinglée, vérification commit, inspection AAR/ABIs/ELF/JVM, intégration `:app`, tests/build), `XrayBridge` (Invoke apiVersion 3, appels hors UI), tests instrumentés réels, script `scripts/inspect_libxray_aar.sh`, doc `docs/LIBXRAY_ANDROID_POC.md`.
+- **En attente de preuve réelle** : résultats CI (SHA-256 AAR, ABIs, signatures JVM, compilation/tests, APK) et exécution instrumentée sur appareil/émulateur.
 
 ### À venir
 - PoC reproductible et vérifiée (artefact/source libXray épinglé, inspection ABIs, intégration minimale compilable si applicable).
