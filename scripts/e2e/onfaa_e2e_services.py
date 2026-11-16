@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """Deterministic end-to-end services for the ONFAA TUNNEL CI test.
 
-Runs two local servers:
+Runs three local servers:
   * a token HTTP server bound to a TEST-NET address (192.0.2.10 by default)
     that is added to the host loopback alias by the workflow;
-  * a minimal DNS responder for onfaa.test -> 192.0.2.10.
+  * a minimal UDP DNS responder for onfaa.test -> 192.0.2.10;
+  * the same responder over DNS-over-TCP (RFC 7766), because the Android
+    emulator's 10.0.2.2 host-loopback alias is reliable for TCP while UDP
+    forwarding to the host loopback is not guaranteed.
 
 The emulator cannot reach 192.0.2.10 directly. A successful HTTP request from
 the Android app therefore proves the packet went through the real Xray client,
@@ -73,36 +76,94 @@ def parse_question(packet: bytes) -> tuple[int, bytes, int, int] | None:
     return qend, name.encode("ascii", "ignore"), qtype, qclass
 
 
-def run_dns(bind: str, port: int, answer_ip: str) -> None:
+def build_response(packet: bytes, answer_ip: str) -> tuple[bytes, str] | None:
+    """Returns the DNS response and a short description, or None if malformed."""
+    parsed = parse_question(packet)
+    if parsed is None:
+        return None
+    question_end, name, qtype, qclass = parsed
+    transaction = packet[:2]
+    question = packet[12:question_end]
+    if name == b"onfaa.test" and qtype == 1 and qclass == 1:
+        flags = 0x8180  # response, recursion available, no error
+        header = transaction + struct.pack("!HHHHH", flags, 1, 1, 0, 0)
+        record = b"\xc0\x0c" + struct.pack("!HHIH", 1, 1, 60, 4) + socket.inet_aton(answer_ip)
+        return header + question + record, f"A onfaa.test -> {answer_ip}"
+    # NXDOMAIN for other names; NOERROR/NODATA for AAAA on onfaa.test.
+    rcode = 0 if name == b"onfaa.test" and qtype == 28 else 3
+    flags = 0x8180 | rcode
+    header = transaction + struct.pack("!HHHHH", flags, 1, 0, 0, 0)
+    return header + question, f"qtype={qtype} name={name.decode('ascii', 'ignore')} rcode={rcode}"
+
+
+def run_dns_udp(bind: str, port: int, answer_ip: str) -> None:
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.bind((bind, port))
-    log(f"DNS listening on {bind}:{port} (onfaa.test -> {answer_ip})")
-    answer = socket.inet_aton(answer_ip)
+    log(f"DNS/UDP listening on {bind}:{port} (onfaa.test -> {answer_ip})")
     while True:
         try:
             packet, peer = sock.recvfrom(1500)
         except OSError as exc:
-            log(f"DNS socket error: {exc}")
+            log(f"DNS/UDP socket error: {exc}")
             return
-        parsed = parse_question(packet)
-        if parsed is None:
+        result = build_response(packet, answer_ip)
+        if result is None:
             continue
-        question_end, name, qtype, qclass = parsed
-        transaction = packet[:2]
-        question = packet[12:question_end]
-        if name == b"onfaa.test" and qtype == 1 and qclass == 1:
-            flags = 0x8180  # response, recursion available, no error
-            header = transaction + struct.pack("!HHHHH", flags, 1, 1, 0, 0)
-            record = b"\xc0\x0c" + struct.pack("!HHIH", 1, 1, 60, 4) + answer
-            sock.sendto(header + question + record, peer)
-            log(f"DNS A onfaa.test from {peer[0]}:{peer[1]} -> {answer_ip}")
-        else:
-            # NXDOMAIN for other names; NOERROR/NODATA for AAAA on onfaa.test.
-            rcode = 0 if name == b"onfaa.test" and qtype == 28 else 3
-            flags = 0x8180 | rcode
-            header = transaction + struct.pack("!HHHHH", flags, 1, 0, 0, 0)
-            sock.sendto(header + question, peer)
+        response, description = result
+        sock.sendto(response, peer)
+        log(f"DNS/UDP {description} from {peer[0]}:{peer[1]}")
+
+
+def receive_exact(connection: socket.socket, length: int) -> bytes | None:
+    data = bytearray()
+    while len(data) < length:
+        chunk = connection.recv(length - len(data))
+        if not chunk:
+            return None
+        data.extend(chunk)
+    return bytes(data)
+
+
+def handle_dns_tcp_connection(connection: socket.socket, peer: tuple[str, int], answer_ip: str) -> None:
+    with connection:
+        connection.settimeout(10)
+        try:
+            while True:
+                header = receive_exact(connection, 2)
+                if header is None:
+                    return
+                length = struct.unpack("!H", header)[0]
+                packet = receive_exact(connection, length)
+                if packet is None:
+                    return
+                result = build_response(packet, answer_ip)
+                if result is None:
+                    return
+                response, description = result
+                connection.sendall(struct.pack("!H", len(response)) + response)
+                log(f"DNS/TCP {description} from {peer[0]}:{peer[1]}")
+        except OSError as exc:
+            log(f"DNS/TCP connection {peer[0]}:{peer[1]} closed: {exc}")
+
+
+def run_dns_tcp(bind: str, port: int, answer_ip: str) -> None:
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind((bind, port))
+    sock.listen(16)
+    log(f"DNS/TCP listening on {bind}:{port} (onfaa.test -> {answer_ip})")
+    while True:
+        try:
+            connection, peer = sock.accept()
+        except OSError as exc:
+            log(f"DNS/TCP accept error: {exc}")
+            return
+        threading.Thread(
+            target=handle_dns_tcp_connection,
+            args=(connection, peer, answer_ip),
+            daemon=True,
+        ).start()
 
 
 def main() -> int:
@@ -117,14 +178,19 @@ def main() -> int:
 
     httpd = ThreadingHTTPServer((args.http_bind, args.http_port), TokenHandler)
     httpd.token = args.token  # type: ignore[attr-defined]
-    http_thread = threading.Thread(target=httpd.serve_forever, daemon=True)
-    http_thread.start()
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
     log(f"HTTP token server on {args.http_bind}:{args.http_port}")
 
-    dns_thread = threading.Thread(
-        target=run_dns, args=(args.dns_bind, args.dns_port, args.answer_ip), daemon=True
-    )
-    dns_thread.start()
+    threading.Thread(
+        target=run_dns_udp,
+        args=(args.dns_bind, args.dns_port, args.answer_ip),
+        daemon=True,
+    ).start()
+    threading.Thread(
+        target=run_dns_tcp,
+        args=(args.dns_bind, args.dns_port, args.answer_ip),
+        daemon=True,
+    ).start()
 
     stopping = False
 

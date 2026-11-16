@@ -36,10 +36,28 @@ Ce plan définit les catégories de tests nécessaires au fil des phases. Les ou
 - Documentation : `docs/LIBXRAY_ANDROID_POC.md`.
 
 ### Phase 3 — Connexion VPN réelle
-- **Tests fonctionnels manuels** sur appareil réel : démarrage/arrêt du tunnel, maintien de session, comportement à la perte réseau, reconnexion si implémentée.
-- Vérification que le trafic passe par le tunnel lorsque connecté (procédure documentée, sans exposer de données sensibles).
-- Tests de robustesse : configuration invalide, refus de permission VPN, arrêt forcé du service.
-- Critère : aucune simulation ; résultats observables et reproductibles.
+- **Tests unitaires JVM (`:app:testDebugUnitTest`)** :
+  - assainissement des erreurs (UUID, liens, valeurs longues, message vide) ;
+  - rejet des liens vides, des schémas non supportés et du VMess base64 historique avec message précis.
+- **Tests instrumentés réels (AAR officiel requis, émulateur x86_64 API 35)** :
+  - conversion réelle d’un lien VLESS et d’un lien VMess par libXray ;
+  - configuration TUN complète acceptée par `testXray` (`env.xray.tun.fd`, inbound `tun`, outbound proxy, DNS) ;
+  - `runXray` avec descripteur invalide → échec propre, état moteur arrêté ;
+  - `stopXray` idempotent ; contrôleurs de protection et DNS appelables.
+- **Tests E2E réels (serveur Xray-core officiel construit depuis le commit épinglé sur le runner)** :
+  - avant connexion : requête directe vers `onfaa.test`/`192.0.2.10:18080` en échec ;
+  - tunnel VLESS : état `Connected` seulement après sonde réelle ;
+  - tunnel VMess : idem ;
+  - DNS : `onfaa.test` → `192.0.2.10` via le DNS du tunnel ;
+  - routage : requête HTTP 200 + token par nom et par IP TEST-NET, adresse uniquement joignable derrière le serveur Xray local ;
+  - arrêt : état `Idle`, `getXrayState=false`, trafic direct de nouveau en échec ;
+  - serveur injoignable : jamais `Connected`, erreur réelle ;
+  - permission VPN : consentement requis (`VpnService.prepare`), connexion sans consentement refusée proprement.
+- **Fixture déterministe** : inbounds VLESS `127.0.0.1:18443` et VMess `127.0.0.1:18444`, sortie `freedom`, serveur token `192.0.2.10:18080` (alias loopback TEST-NET), DNS `127.0.0.1:15353` en **UDP et TCP** répondant `onfaa.test` ; l’émulateur joint l’hôte via `10.0.2.2`. Le tunnel interroge le DNS en **TCP** (`tcp://10.0.2.2:15353`) car le forwarding UDP de l’alias hôte de l’émulateur n’est pas garanti, alors que TCP l’est.
+- **Preuve** : journal d’accès du serveur Xray contenant la destination `192.0.2.10:18080`, XML `VpnTunnelE2ETest` avec 3 tests, 0 échec, 0 ignoré ; artefacts APK + rapport.
+- **Limite CI** : le changement d’IP publique n’est pas démontrable (même sortie réseau) ; protocole manuel dans `docs/PHASE_3_REPORT.md`.
+- **Limite matérielle** : appareil physique ARM64 non disponible ; protocole fourni, statut en attente.
+- Documentation : `docs/PHASE_3_REPORT.md`.
 
 ### Phase 4 — Importation des configurations
 - Tests de parsing/validation pour VLESS et VMess (cas valides, invalides, limites).

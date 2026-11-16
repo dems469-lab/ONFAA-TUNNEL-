@@ -19,6 +19,19 @@
 - **Preuves** : compilation `:app` avec AAR, tests unitaires et **tests instrumentés réels réussis sur émulateur x86_64 API 35** (`invoke`, `xrayVersion`, erreurs) — voir `docs/LIBXRAY_ANDROID_POC.md`.
 - **Toujours absent** : établissement du tunnel VPN (`VpnService`/TUN), routage, états de connexion, statistiques (Phase 3+).
 
+## État Phase 3 (tunnel réel implémenté, validation CI en cours)
+
+- **Service VPN réel** : `OnfaaTunnelVpnService` établit un TUN Android (IPv4 `10.10.0.2/24`, IPv6 `fd00::2/64`, routes par défaut, DNS `10.10.0.1`/`fd00::1`, MTU 1500), se déclare au premier plan et pilote le moteur.
+- **Chaîne réelle** : `MainActivity`/Compose → `TunnelConfigRepository`/`TunnelStatusRepository` → `OnfaaTunnelVpnService` → `XrayBridge` → `libXray.LibXray#invoke` / `setDNS` / `registerDialerController` → **Xray-core officiel**.
+- **Contrat TUN** : le descripteur du `VpnService` est transmis au moteur via `env["xray.tun.fd"]` (Xray-core v26.11.9 ; libXray n’expose plus `SetTunFd`). Le service Android possède adresses/routes/DNS ; l’inbound `tun` lit le descripteur.
+- **Protection des sockets** : les sockets du moteur sont protégés par `VpnService.protect(fd)` via un `DialerController` réel, pour éviter la boucle VPN. `setDNS`/`resetDNS` configurent le résolveur Go utilisé par libXray.
+- **Configuration** : lien VLESS/VMess → `convertShareLinksToXrayJson` (libXray) → outbound réel → configuration TUN complète (`XrayConfigBuilder`) → `testXray` → `runXray`.
+- **DNS/routage** : port 53 issu du TUN → `dns-out` ; requêtes DNS internes → sortie directe ; réseaux privés → direct ; trafic restant → proxy.
+- **États** : `Idle`/`Connecting`/`Verifying`/`Connected`/`Disconnecting`/`Error`. `Connected` exige `runXray` réussi, `getXrayState=true` et une **sonde HTTP réelle** à travers le tunnel.
+- **Arrêt** : `stopXray` → `resetDNS` → neutralisation du protector → fermeture du TUN → arrêt du foreground → `stopSelf` ; gestion de `onRevoke`/`onDestroy`.
+- **Import** : validation réelle par le moteur, erreurs précises, secrets masqués ; profils en mémoire uniquement (persistance chiffrée en phase suivante).
+- **Limite** : validation native prouvée sur émulateur x86_64 ; appareil physique ARM64 à exécuter.
+
 ## Vue d’ensemble
 
 Application Android native en **Kotlin**, structurée autour de :
@@ -59,13 +72,13 @@ Application Android native en **Kotlin**, structurée autour de :
 - **Statistiques & diagnostics** : collecte de métriques réelles disponibles, affichage, export contrôlé des logs.
 - **DNS & routage** : paramètres exposés à l’utilisateur en cohérence avec les capacités du moteur et d’Android.
 
-## Flux cible (simplifié)
+## Flux réel (Phase 3)
 
-1. L’utilisateur sélectionne un profil et demande la connexion.
-2. L’application prépare la configuration (source : stockage local) et démarre le `VpnService`.
-3. Le service initialise l’interface VPN et orchestre l’exécution du moteur **Xray via libXray**.
-4. Le trafic est acheminé selon la configuration ; l’état et les métriques sont publiés (Flow) vers l’UI.
-5. À l’arrêt, le moteur et le service sont proprement terminés ; l’état persistant est mis à jour.
+1. L’utilisateur importe un lien VLESS/VMess ; `ConfigImporter` appelle le convertisseur libXray, construit la configuration TUN et la fait valider par `testXray`.
+2. L’utilisateur sélectionne un profil et demande la connexion ; l’UI obtient le consentement `VpnService.prepare` si nécessaire puis démarre le service au premier plan.
+3. Le service établit le TUN, enregistre le protector de sockets, configure `setDNS`, construit la configuration complète, la valide puis appelle `runXray`.
+4. Le service vérifie `getXrayState` puis effectue une requête HTTP réelle à travers le tunnel ; seulement alors il publie `Connected`.
+5. À l’arrêt (bouton, notification, révocation ou destruction), le service arrête le moteur, restaure le DNS, ferme le TUN et publie `Idle`/`Error`.
 
 ## Décisions différées / à confirmer
 

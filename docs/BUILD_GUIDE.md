@@ -59,6 +59,34 @@ Un build local peut être tenté uniquement dans un environnement disposant d’
 - **Résultats** : `docs/LIBXRAY_ANDROID_POC.md` (SHA-256, ABIs, signature `libXray.LibXray#invoke`, tests).
 - **Interdits** : téléchargement non vérifié, modification silencieuse upstream, `|| true`, intégration de binaire non tracé.
 
+## Intégration libXray et tunnel réel (Phase 3 — implémentée, validation CI en cours)
+
+Workflow : `.github/workflows/libxray-poc.yml` (déclencheurs : `push` sur `main` pour les sources/CI/E2E, `workflow_dispatch`).
+
+Étapes principales :
+1. Build de l’AAR officiel libXray depuis le commit épinglé, inspection (SHA-256, ABIs, ELF, 16 KiB, `javap`) puis intégration `app/libs/libXray.aar` (non commité).
+2. Build du binaire **Xray-core officiel** depuis le commit épinglé (`v26.11.9`, `676eaf66…`) sur le runner, vérification du commit, `xray version`, validation de la configuration serveur (`xray -test`).
+3. Démarrage de la fixture E2E : inbounds VLESS/VMess loopback, sortie `freedom`, serveur token HTTP sur `192.0.2.10:18080` (alias loopback TEST-NET), DNS `127.0.0.1:15353` en UDP et TCP pour `onfaa.test` ; le tunnel utilise `tcp://10.0.2.2:15353` (forwarding UDP de l’alias hôte non garanti).
+4. Tests unitaires `:app:testDebugUnitTest`, APK debug, APK androidTest.
+5. Tests instrumentés réels sur émulateur x86_64 API 35 avec arguments :
+   ```bash
+   ./gradlew :app:connectedDebugAndroidTest \
+     -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e=true \
+     -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.uuid="<uuid-de-test>" \
+     -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.host="10.0.2.2" \
+     -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.vlessPort="18443" \
+     -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.vmessPort="18444" \
+     -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.dns="tcp://10.0.2.2:15353" \
+     -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.probeUrl="http://onfaa.test:18080/token" \
+     -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.token="<token-de-test>"
+   ```
+6. Vérification des preuves : XML `VpnTunnelE2ETest` (3 tests, 0 échec/erreur/ignoré), journal d’accès Xray contenant `192.0.2.10:18080`, collecte des journaux, arrêt des serveurs, suppression de l’alias loopback.
+7. Publication des artefacts : `poc-report` (AAR, preuves, rapports, APK de test) et APK debug fonctionnel.
+
+**Sécurité des builds** : le trafic HTTP en clair n’est autorisé que dans le variant **debug** (`app/src/debug/res/xml/network_security_config.xml`) pour la fixture CI ; le variant release garde `cleartextTrafficPermitted=false`.
+
+**Résultats** : consignés dans `docs/PHASE_3_REPORT.md` et `STATUS.md` après exécution réelle ; ne pas annoncer de succès avant.
+
 ## Secrets et signature
 
 - Aucun secret, keystore, mot de passe ou token ne doit être commité.

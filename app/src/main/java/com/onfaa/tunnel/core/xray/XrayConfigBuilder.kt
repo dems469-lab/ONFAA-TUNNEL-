@@ -58,8 +58,7 @@ object XrayConfigBuilder {
             .put("queryStrategy", "UseIP")
             .put("servers", JSONArray().apply {
                 dnsEndpoints.forEach { endpoint ->
-                    val (address, port) = splitEndpoint(endpoint)
-                    put(JSONObject().put("address", address).put("port", port))
+                    put(dnsServerObject(endpoint))
                 }
             }))
 
@@ -99,6 +98,20 @@ object XrayConfigBuilder {
                     .put("outboundTag", DIRECT_OUTBOUND_TAG))))
 
         return config.toString()
+    }
+
+    /**
+     * Xray accepts plain UDP endpoints ("1.1.1.1") with a separate port, or a
+     * URL form such as "tcp://10.0.2.2:15353". In the URL form the port is part
+     * of the address and must not be duplicated in the JSON "port" field.
+     */
+    private fun dnsServerObject(endpoint: String): JSONObject {
+        val value = endpoint.trim()
+        if (value.contains("://")) {
+            return JSONObject().put("address", value)
+        }
+        val (address, port) = splitEndpoint(value)
+        return JSONObject().put("address", address).put("port", port)
     }
 
     /** Splits "1.1.1.1:53", "8.8.8.8" or "[2001:db8::1]:53". */

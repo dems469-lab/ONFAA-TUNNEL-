@@ -97,10 +97,30 @@ class OnfaaTunnelVpnService : VpnService() {
                 throw IllegalStateException("Moteur libXray indisponible dans cette compilation")
             }
 
+            val dnsEndpoint = intent.getStringExtra(EXTRA_DNS_SERVER) ?: DEFAULT_DNS_SERVER
+            val resolverEndpoint = dnsEndpoint
+                .removePrefix("tcp://")
+                .removePrefix("udp://")
+
+            // Validate with an inert descriptor first (fd 0 is a valid, harmless
+            // file in the app process): testXray only constructs handlers and
+            // never reads the TUN. The live VPN descriptor is created afterwards.
+            val validation = XrayBridge.testXray(
+                XrayConfigBuilder.build(
+                    profile = profile,
+                    tunFd = 0,
+                    dnsEndpoints = listOf(dnsEndpoint)
+                )
+            )
+            if (!validation.success) {
+                throw IllegalStateException(
+                    "Configuration refusée par Xray : ${XrayErrorSanitizer.sanitize(validation.error)}"
+                )
+            }
+
             val descriptor = buildTun() ?: throw IllegalStateException("Permission VPN refusée par Android")
             tun = descriptor
 
-            val dnsEndpoint = intent.getStringExtra(EXTRA_DNS_SERVER) ?: DEFAULT_DNS_SERVER
             val protector: (Int) -> Boolean = { fd ->
                 try {
                     protect(fd)
@@ -111,20 +131,13 @@ class OnfaaTunnelVpnService : VpnService() {
             if (!XrayBridge.registerSocketProtector(protector)) {
                 throw IllegalStateException("Impossible d'enregistrer la protection des sockets VPN")
             }
-            XrayBridge.setDNS(protector, dnsEndpoint)
+            XrayBridge.setDNS(protector, resolverEndpoint)
 
             val config = XrayConfigBuilder.build(
                 profile = profile,
                 tunFd = descriptor.fd,
                 dnsEndpoints = listOf(dnsEndpoint)
             )
-
-            val validation = XrayBridge.testXray(config)
-            if (!validation.success) {
-                throw IllegalStateException(
-                    "Configuration refusée par Xray : ${XrayErrorSanitizer.sanitize(validation.error)}"
-                )
-            }
 
             val started = XrayBridge.runXray(config)
             if (!started.success) {

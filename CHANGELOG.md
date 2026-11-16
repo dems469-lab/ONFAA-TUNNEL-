@@ -6,6 +6,17 @@ Le format s’inspire de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/
 
 ## [Unreleased]
 
+### Phase 3 — connexion VPN réelle via libXray/Xray-core (implémentation livrée, validation CI en cours)
+- `OnfaaTunnelVpnService` réel : TUN IPv4/IPv6, routes par défaut, DNS, foreground service, consentement VPN, cycle de vie complet (connexion, vérification, arrêt, révocation, destruction).
+- Pont moteur étendu (`XrayBridge`) : conversion réelle des liens, `testXray`, `runXray`, `stopXray`, `getXrayState`, protection des sockets via `VpnService.protect`, `setDNS`/`resetDNS`, appels hors thread UI.
+- Contrat TUN réel Xray-core v26.11.9 : descripteur passé dans `env["xray.tun.fd"]` ; routage DNS/privé/proxy construit par `XrayConfigBuilder`.
+- Import VLESS/VMess réel via `convertShareLinksToXrayJson`, validation par `testXray`, erreurs précises et assainies ; refus explicite du VMess base64 historique non supporté par l’upstream.
+- UI branchée sur l’état réel : connexion/déconnexion, import/validation, journaux réels, aucune statistique fictive.
+- Tests : unitaires (assainissement, validation d’import), instrumentés moteur (conversion, config TUN, fd invalide, idempotence) et E2E réel (serveur Xray-core officiel local, VLESS, VMess, DNS, routage, arrêt, serveur injoignable, permission VPN).
+- Workflow `libxray-poc.yml` étendu : build du serveur Xray-core épinglé, services E2E déterministes (token HTTP sur TEST-NET + DNS `onfaa.test`), arguments d’instrumentation, vérification des preuves et du journal d’accès, artefacts.
+- **Limites** : appareil physique ARM64 non disponible ; changement d’IP publique non démontrable en CI ; profils en mémoire uniquement ; statistiques de trafic non collectées.
+- **Validation** : run [#43978101438](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/43978101438) — résultat à confirmer.
+
 ### Phase 2 — audit et intégration libXray officielle (TERMINÉE, validée en CI)
 - Audit des sources officielles XTLS/Xray-core v26.11.9 (commit `676eaf66…`, MPL-2.0) et XTLS/libXray v26.11.9 (commit `5a0f7d8…`, MIT), alignement de dépendance vérifié.
 - Ajout de `docs/XRAY_UPSTREAM_AUDIT.md` et `docs/LIBXRAY_API_REFERENCE.md`.

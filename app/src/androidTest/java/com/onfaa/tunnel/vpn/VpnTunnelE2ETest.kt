@@ -49,7 +49,7 @@ class VpnTunnelE2ETest {
     private val host get() = args.getString("onfaa.e2e.host") ?: "10.0.2.2"
     private val vlessPort get() = args.getString("onfaa.e2e.vlessPort") ?: "18443"
     private val vmessPort get() = args.getString("onfaa.e2e.vmessPort") ?: "18444"
-    private val dns get() = args.getString("onfaa.e2e.dns") ?: "10.0.2.2:15353"
+    private val dns get() = args.getString("onfaa.e2e.dns") ?: "tcp://10.0.2.2:15353"
     private val probeUrl get() = args.getString("onfaa.e2e.probeUrl") ?: "http://onfaa.test:18080/token"
     private val token get() = args.getString("onfaa.e2e.token") ?: ""
 

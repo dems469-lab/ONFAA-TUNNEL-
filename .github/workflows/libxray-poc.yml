@@ -235,18 +235,69 @@ jobs:
           "$E2E_DIR/xray" -c "$E2E_DIR/server.json" > "$E2E_DIR/xray-server.log" 2>&1 &
           echo $! > "$E2E_DIR/xray.pid"
           python3 - <<'PY'
-          import socket, time
-          for port in (18443, 18444):
-              for _ in range(50):
+          import os
+          import socket
+          import struct
+          import sys
+          import time
+
+          answer_ip = os.environ["E2E_ANSWER_IP"]
+          http_port = int(os.environ["E2E_HTTP_PORT"])
+          dns_port = int(os.environ["E2E_DNS_PORT"])
+
+          def wait_tcp(host, port, label, timeout=25.0):
+              deadline = time.time() + timeout
+              while time.time() < deadline:
                   try:
-                      socket.create_connection(("127.0.0.1", port), 1).close()
-                      break
+                      socket.create_connection((host, port), 1).close()
+                      return
                   except OSError:
-                      time.sleep(0.2)
-              else:
-                  raise SystemExit(f"port {port} not listening")
+                      time.sleep(0.25)
+              raise SystemExit(f"{label} {host}:{port} not ready")
+
+          def wait_dns_tcp(host, port, timeout=25.0):
+              query = (
+                  b"\x12\x34"
+                  + struct.pack("!HHHHH", 0x0100, 1, 0, 0, 0)
+                  + b"\x05onfaa\x04test\x00"
+                  + struct.pack("!HH", 1, 1)
+              )
+              deadline = time.time() + timeout
+              while time.time() < deadline:
+                  try:
+                      with socket.create_connection((host, port), 1) as sock:
+                          sock.sendall(struct.pack("!H", len(query)) + query)
+                          sock.settimeout(2)
+                          header = sock.recv(2)
+                          if len(header) != 2:
+                              raise OSError("short DNS/TCP length")
+                          size = struct.unpack("!H", header)[0]
+                          body = b""
+                          while len(body) < size:
+                              chunk = sock.recv(size - len(body))
+                              if not chunk:
+                                  raise OSError("short DNS/TCP body")
+                              body += chunk
+                          if not body.endswith(socket.inet_aton(answer_ip)):
+                              raise OSError(f"unexpected DNS answer: {body!r}")
+                          return
+                  except OSError:
+                      time.sleep(0.25)
+              raise SystemExit(f"DNS/TCP {host}:{port} not ready")
+
+          wait_tcp("127.0.0.1", 18443, "VLESS inbound")
+          wait_tcp("127.0.0.1", 18444, "VMess inbound")
+          wait_tcp(answer_ip, http_port, "token HTTP")
+          wait_dns_tcp("127.0.0.1", dns_port)
+          print("E2E responders ready (Xray, token HTTP, DNS/TCP)")
           PY
-          curl -fsS "http://$E2E_ANSWER_IP:$E2E_HTTP_PORT/token" | tee "$E2E_DIR/token.txt"
+          if ! kill -0 "$(cat "$E2E_DIR/services.pid")" 2>/dev/null; then
+            echo "E2E responder process exited before becoming ready"
+            cat "$E2E_DIR/services.log"
+            exit 1
+          fi
+          curl -fsS "http://$E2E_ANSWER_IP:$E2E_HTTP_PORT/token" -o "$E2E_DIR/token.txt"
+          test -s "$E2E_DIR/token.txt" || { cat "$E2E_DIR/services.log"; exit 1; }
           test "$(cat "$E2E_DIR/token.txt")" = "$E2E_TOKEN"
           echo "E2E servers ready: Xray $E2E_VLESS_PORT/$E2E_VMESS_PORT, token $E2E_HTTP_PORT, DNS $E2E_DNS_PORT"
 
@@ -352,7 +403,7 @@ jobs:
               -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.host="10.0.2.2" \
               -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.vlessPort="$E2E_VLESS_PORT" \
               -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.vmessPort="$E2E_VMESS_PORT" \
-              -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.dns="10.0.2.2:$E2E_DNS_PORT" \
+              -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.dns="tcp://10.0.2.2:$E2E_DNS_PORT" \
               -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.probeUrl="http://onfaa.test:$E2E_HTTP_PORT/token" \
               -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.token="$E2E_TOKEN"
 

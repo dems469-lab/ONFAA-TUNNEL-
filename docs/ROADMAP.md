@@ -22,10 +22,12 @@ La roadmap est organisée en dix phases. Chaque phase doit être documentée, va
 ## Phase 3 — Connexion VPN réelle
 - **Objectif :** établir une connexion VPN réelle via `VpnService` et le moteur Xray intégré.
 - **Livrables attendus :** cycle de vie de connexion/arrêt, gestion d’erreurs, état fiable, preuves de fonctionnement réel (tests manuels/procédure documentée).
+- **État :** **implémentation livrée, validation CI en cours** — TUN réel + `libXray`, import/validation VLESS/VMess réels, états réels, tests E2E avec serveur Xray-core officiel local (VLESS, VMess, DNS, routage, arrêt), workflow de preuve. Voir `docs/PHASE_3_REPORT.md` et le run `43978101438`. Reste à confirmer par la CI et à exécuter sur appareil physique ARM64.
 
-## Phase 4 — Importation des configurations
-- **Objectif :** importer et gérer des configurations personnelles (VLESS, VMess).
-- **Livrables attendus :** mécanismes d’import, validation, persistance sécurisée locale, sélection de profil actif.
+## Phase 4 — Importation et gestion des configurations
+- **Objectif :** persister et gérer des configurations personnelles (VLESS, VMess) de façon sécurisée.
+- **Livrables attendus :** persistance chiffrée locale, sélection de profil active, gestion des profils, migration des profils en mémoire de la Phase 3.
+- **Note :** l’import, la validation moteur et la conversion VLESS/VMess sont déjà réalisés en Phase 3 (`ConfigImporter`), sans persistance.
 
 ## Phase 5 — Interface complète
 - **Objectif :** implémenter l’UI complète selon la spécification.

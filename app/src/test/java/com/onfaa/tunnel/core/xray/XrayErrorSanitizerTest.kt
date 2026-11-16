@@ -39,8 +39,17 @@ class XrayErrorSanitizerTest {
 
     @Test
     fun truncatesLongMessage() {
-        val sanitized = XrayErrorSanitizer.sanitize("x".repeat(500))
+        // Long words separated by spaces so the base64-like secret masker does
+        // not replace the input before the 240-character truncation applies.
+        val sanitized = XrayErrorSanitizer.sanitize("erreur " + "x ".repeat(500))
         assertTrue(sanitized.length <= 241)
         assertTrue(sanitized.endsWith("…"))
+    }
+
+    @Test
+    fun masksLongBase64LikeSecretInsteadOfTruncating() {
+        val sanitized = XrayErrorSanitizer.sanitize("key=" + "A".repeat(64))
+        assertFalse(sanitized.contains("A".repeat(64)))
+        assertTrue(sanitized.contains("[valeur-masquée]"))
     }
 }

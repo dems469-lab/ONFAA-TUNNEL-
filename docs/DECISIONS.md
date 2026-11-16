@@ -41,16 +41,34 @@ Ce document consigne les décisions prises, les hypothèses de travail et les ch
 | 2026-11-16 | Binding JVM réel | `libXray.LibXray` méthode **`public static native String invoke(String)`** (minuscule), runtime Go chargé par initialisation de classe | `javap` CI |
 | 2026-11-16 | Validation runtime | Tests instrumentés réels exécutés sur émulateur **x86_64 API 35** en CI : 6/6 succès, 0 ignoré | run `43965698249` |
 
+## Décisions validées (Phase 3 — tunnel réel)
+
+| Date | Décision | Raison / portée |
+| --- | --- | --- |
+| 2026-11-16 | Contrat TUN : descripteur `VpnService` transmis dans `env["xray.tun.fd"]` de la configuration Xray, inbound `tun` | Xray-core v26.11.9 lit ce contrat (`common/platform.TunFdKey`) ; libXray v26.11.9 n’expose plus `SetTunFd` |
+| 2026-11-16 | TUN Android : `10.10.0.2/24`, `fd00::2/64`, routes `0.0.0.0/0` et `::/0`, DNS `10.10.0.1`/`fd00::1`, MTU 1500 | Interface complète possédée par Android ; le moteur ne fait que lire le descripteur |
+| 2026-11-16 | Protection des sockets via `VpnService.protect(fd)` exposée par un vrai `DialerController` (`protectFd(long)`) enregistré par `registerDialerController` | Éviter la boucle de routage du moteur ; contrat réel vérifié dans l’AAR |
+| 2026-11-16 | Résolveur Go configuré par `setDNS(protector, serveur)` et restauré par `resetDNS()` | libXray résout les domaines via ce résolveur ; restauration obligatoire à l’arrêt |
+| 2026-11-16 | Pipeline : lien → `convertShareLinksToXrayJson` → outbound réel → configuration TUN complète → `testXray` → `runXray` | Une seule chaîne officielle, aucune configuration inventée |
+| 2026-11-16 | `Connected` publié uniquement après `runXray` réussi + `getXrayState=true` + sonde HTTP réelle réussie | Interdiction de toute connexion simulée ou affichée sans preuve |
+| 2026-11-16 | Profils en mémoire uniquement (pas de fichier en clair) | Ne pas exposer d’identifiants ; persistance chiffrée reportée à la phase suivante |
+| 2026-11-16 | VMess base64 historique refusé avec message explicite ; seul le format URL `vmess://UUID@hôte:port?...` est accepté | Le convertisseur libXray v26.11.9 ne gère pas le format historique ; ne pas prétendre le supporter |
+| 2026-11-16 | E2E : serveur Xray-core officiel construit depuis le commit épinglé sur le runner ; émulateur via `10.0.2.2` ; fixture token HTTP sur TEST-NET `192.0.2.10:18080` + DNS `onfaa.test` | Prouver tunnel, DNS et routage réels sans dépendance Internet externe |
+| 2026-11-16 | DNS du tunnel en **TCP** vers `10.0.2.2:15353` en E2E (fixture servant UDP et TCP) | Le forwarding UDP de l’alias hôte `10.0.2.2` de l’émulateur n’est pas garanti ; TCP l’est. Xray-core accepte l’adresse `tcp://hôte:port` |
+| 2026-11-16 | Changement d’IP publique non revendiqué en CI (même sortie réseau) ; protocole manuel documenté | Ne pas affirmer un résultat non mesurable dans l’environnement |
+| 2026-11-16 | Trafic HTTP en clair autorisé uniquement en variant `debug` pour la fixture ; release en TLS strict | La fixture E2E est hors production ; le build release reste durci |
+| 2026-11-16 | Aucune statistique de trafic affichée tant qu’aucune source réelle n’est branchée | Pas de compteurs simulés |
+
 ## Choix techniques à confirmer / à compléter
 
 | Sujet | Questions ouvertes | Phase cible |
 | --- | --- | --- |
 | **Stockage de l’AAR** | Choix retenu : build from source en CI, AAR non commité (gitignore), injection vérifiée dans `app/libs` | Phase 2 (fait) / 9 |
-| **Exécution arm** | Valider `xrayVersion`/`invoke` sur appareil physique `arm64-v8a` (émulateur x86_64 seulement en CI) | Phase 3 |
-| **Formats d’import** | Liens/URI (vmess://, vless://, etc.), JSON, QR, presse-papiers ; règles de validation | Phase 4 |
-| **Modèle de données** | Schéma Room (profils, groupes, journaux), stratégie de migration | Phases 1–4 |
-| **Statistiques** | Sources (API Android, compteurs moteur/stats Xray), granularité, rétention | Phases 3, 6 |
-| **DNS/Routage** | Ensemble d’options exposées, correspondance avec capacités Xray/libXray | Phases 6–7 |
+| **Exécution arm** | Valider `xrayVersion`/`invoke`/tunnel sur appareil physique `arm64-v8a` (émulateur x86_64 seulement en CI) — **en attente**, protocole dans `docs/PHASE_3_REPORT.md` | Phase 3 |
+| **Formats d’import** | Liens `vless://` et `vmess://` URL implémentés et validés en Phase 3 ; restent JSON, QR, presse-papiers et persistance | Phase 4 |
+| **Modèle de données** | Schéma Room (profils, groupes, journaux), persistance chiffrée, stratégie de migration | Phases 4+ |
+| **Statistiques** | Aucune source réelle branchée : ne pas afficher de compteurs tant que l’API moteur n’est pas intégrée | Phases 6+ |
+| **DNS/Routage** | Base réelle Phase 3 : DNS via tunnel, privé direct, reste proxy ; options utilisateur à exposer | Phases 6–7 |
 | **CI/CD détaillée** | Jobs dédiés libXray, caching, secrets GitHub (si nécessaires), signature d’artefacts | Phase 9 |
 | **Stratégie de tests automatisés** | Unitaires, instrumentation, tests d’intégration réseau (environnement contrôlé) | Phases 1, 3, 8 |
 

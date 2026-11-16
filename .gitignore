@@ -35,6 +35,7 @@ secrets.*
 bin/
 gen/
 out/
+__pycache__/
 
 # Phase 2B PoC artifacts (built/verified in CI, not committed)
 app/libs/*.aar
