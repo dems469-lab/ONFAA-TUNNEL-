@@ -19,7 +19,13 @@ Workflow : `.github/workflows/android.yml` (déclencheurs : `push`/`pull_request
 8. **Compilation debug** : `./gradlew :app:assembleDebug --stacktrace`
 9. **Artefact APK** : upload `app/build/outputs/apk/debug/*.apk` (`if-no-files-found: error`)
 
-> Les résultats réels (succès/échec, durée, lien de run, disponibilité de l’artefact) doivent être consignés dans `STATUS.md` après exécution vérifiée.
+## Résultats vérifiés (Phase 1)
+
+- **Run réussi :** https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/43954661801 (commit `22551de`, `completed/success`)
+- **Artefact :** `onfaa-tunnel-debug-apk` (produit par le run ci-dessus)
+- **Runs antérieurs (corrections CI)** : #43953850169 (échec setup Android SDK), #43954402981 (échec installation/licences SDK explicites) — corrigés avant validation finale.
+
+> Les résultats réels doivent continuer à être consignés dans `STATUS.md` après chaque exécution pertinente.
 
 ## Outils et versions épinglés (Phase 1)
 
