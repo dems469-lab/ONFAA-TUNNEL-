@@ -1,6 +1,15 @@
-# Architecture cible — ONFAA TUNNEL
+# Architecture — ONFAA TUNNEL
 
-> Ce document décrit l’**architecture cible**. Il ne décrit pas une implémentation existante. Les détails d’intégration `libXray` (signatures, types, cycle de vie exact) seront confirmés en Phase 2.
+> Ce document décrit l’**architecture cible** et l’état des **fondations implémentées en Phase 1**. Les détails d’intégration `libXray` (signatures, types, cycle de vie exact) seront confirmés en Phase 2. Voir aussi [`ANDROID_XRAY_SEPARATION.md`](ANDROID_XRAY_SEPARATION.md).
+
+## État Phase 1 (implémenté/préparé)
+
+- **Module** : `:app` unique, package `com.onfaa.tunnel`.
+- **UI** : `MainActivity` + Jetpack Compose (Material 3) + Navigation Compose avec 5 écrans (`feature/home`, `configs`, `stats`, `logs`, `settings`). Bouton connexion désactivé et non opérationnel ; aucun état/statistique fictif.
+- **VPN (préparation)** : `OnfaaTunnelVpnService` (extends `VpnService`) déclaré dans le manifeste avec permissions préparatoires ; **aucun tunnel, aucun moteur**.
+- **Données (préparation)** : modèles domaine (`domain/model`), Room (`data/local/db` : entité, DAO, `OnfaaDatabase`), DataStore (`data/preferences/UserPreferencesRepository`), constantes (`core/AppConstants`).
+- **Tests** : unitaires JUnit dans `app/src/test`, squelette instrumenté dans `app/src/androidTest`.
+- **Moteur Xray/libXray** : **non intégré** (interdit en Phase 1).
 
 ## Vue d’ensemble
 

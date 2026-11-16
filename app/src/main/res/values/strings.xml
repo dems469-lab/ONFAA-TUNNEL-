@@ -1,0 +1,10 @@
+<resources>
+    <string name="app_name">ONFAA TUNNEL</string>
+    <string name="nav_home">Accueil</string>
+    <string name="nav_configs">Configurations</string>
+    <string name="nav_stats">Statistiques</string>
+    <string name="nav_logs">Journaux</string>
+    <string name="nav_settings">Paramètres</string>
+    <string name="connect_disabled">Connexion non opérationnelle (moteur Xray/libXray non intégré)</string>
+    <string name="home_status">État : moteur VPN non intégré — aucune connexion active</string>
+</resources>

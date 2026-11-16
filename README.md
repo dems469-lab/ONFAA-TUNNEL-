@@ -1,9 +1,9 @@
 # ONFAA TUNNEL
 
-ONFAA TUNNEL est un client VPN Android natif visant à fournir une connexion VPN réelle basée sur le cœur officiel **XTLS/Xray-core** via **libXray**.
+ONFAA TUNNEL est un client VPN Android natif visant à fournir une connexion VPN réelle basée sur le cœur officiel **XTLS/Xray-core** (upstream : https://github.com/XTLS/Xray-core) via **libXray** (après vérification de compatibilité/API officielle).
 
-> **État actuel : Phase 0 — Initialisation GitHub (en cours de mise en place documentaire).**  
-> Aucun moteur VPN, aucune connexion réelle et aucun binaire Xray ne sont encore intégrés à ce stade.
+> **État actuel : Phase 1 — Fondations Android natives (en cours de validation CI).**  
+> Une application Android native (Kotlin, Jetpack Compose, navigation 5 écrans) et une base de données/préférences sont préparées. **Aucun moteur VPN, aucune connexion réelle, aucun binaire Xray/libXray et aucune statistique fictive ne sont intégrés.**
 
 ## Objectifs
 
@@ -15,45 +15,38 @@ ONFAA TUNNEL est un client VPN Android natif visant à fournir une connexion VPN
 - Réglages DNS, routage, journaux et diagnostics.
 - Interface complète avec thèmes personnalisables.
 
-## Technologies cibles
+## Technologies (Phase 1)
 
-- **Android natif**, **Kotlin**
-- **Android `VpnService`**
-- **XTLS/Xray-core officiel** intégré via **libXray** (aucun remplacement par sing-box)
-- **Room** (persistance locale), **DataStore** (préférences)
-- **Coroutines & Flow** (asynchronisme et flux réactifs)
+- **Android natif**, **Kotlin** (plugin Compose), **AndroidX**, **Jetpack Compose** (Material 3), **Navigation Compose**
+- **Gradle** avec catalogue de versions (`gradle/libs.versions.toml`), wrapper Gradle commité
+- **Room** (entité/DAO/base préparés), **DataStore Preferences** (dépôt de préférences préparé)
+- **Coroutines & Flow**, **JUnit 4** pour tests unitaires
+- **Android `VpnService`** : préparation manifeste + classe de base `OnfaaTunnelVpnService` (aucun tunnel)
 
-Les signatures exactes de l’API `libXray` ne sont pas inventées dans cette phase ; elles seront confirmées lors de l’étude et de l’intégration (Phase 2).
+Versions épinglées et choix documentés dans [`docs/DECISIONS.md`](docs/DECISIONS.md) et [`docs/BUILD_GUIDE.md`](docs/BUILD_GUIDE.md).
 
 ## État du dépôt
 
-Ce dépôt GitHub est la **source centrale et permanente** du projet. Tout développement validé doit y être publié pour permettre la reprise du travail par un autre agent ou environnement.
-
 - Branche principale : `main`
-- Documentation de suivi : [`STATUS.md`](STATUS.md)
-- Historique des changements : [`CHANGELOG.md`](CHANGELOG.md)
-- Feuille de route : [`docs/ROADMAP.md`](docs/ROADMAP.md)
+- Package Android : `com.onfaa.tunnel` (`applicationId` identique)
+- Suivi : [`STATUS.md`](STATUS.md), [`CHANGELOG.md`](CHANGELOG.md), [`docs/ROADMAP.md`](docs/ROADMAP.md)
+- Séparation des responsabilités : [`docs/ANDROID_XRAY_SEPARATION.md`](docs/ANDROID_XRAY_SEPARATION.md)
 
-## Structure du projet (Phase 0)
+## Structure du projet
 
 ```
 .
-├── README.md, STATUS.md, CHANGELOG.md, CONTRIBUTING.md, LICENSE
-├── docs/                 # Contexte, architecture, roadmap, décisions, tests, build, sécurité, design
-├── app/                  # Futur module/application Android (structure préparée)
-├── gradle/               # Futurs éléments liés à Gradle/wrapper (structure préparée)
-└── .github/              # Modèles et préparation CI/CD (workflows documentaires en Phase 0)
+├── app/                  # Module Android (sources, ressources, tests, manifeste)
+├── gradle/               # Wrapper + libs.versions.toml
+├── docs/                 # Documentation projet, architecture, build, sécurité, design
+├── .github/workflows/    # CI Android (validation et build debug)
+├── build.gradle.kts, settings.gradle.kts, gradle.properties
+└── gradlew, gradlew.bat
 ```
 
-## Suivre le développement
+## Compilation (GitHub Actions uniquement)
 
-1. Consulter [`STATUS.md`](STATUS.md) pour la phase actuelle, le dernier commit publié, les blocages et les instructions de reprise.
-2. Consulter [`docs/ROADMAP.md`](docs/ROADMAP.md) pour les phases 0 à 9.
-3. Consulter [`docs/DECISIONS.md`](docs/DECISIONS.md) pour les choix validés et ouverts.
-
-## Compilation
-
-La compilation sera réalisée **exclusivement via GitHub Actions** lorsqu’elle sera mise en place (prévue Phase 9). Aucun workflow de build Android trompeur n’est fourni en Phase 0 ; voir [`docs/BUILD_GUIDE.md`](docs/BUILD_GUIDE.md) et `.github/workflows/README.md`.
+La validation et la compilation sont réalisées sur **GitHub Actions** via `.github/workflows/android.yml` (JDK/SDK, licences, validation wrapper, tests unitaires, `assembleDebug`, publication de l’APK debug en artefact). Voir [`docs/BUILD_GUIDE.md`](docs/BUILD_GUIDE.md).
 
 ## Sécurité
 
@@ -61,4 +54,4 @@ Ne jamais commiter de configurations personnelles, UUID, clés, secrets ou token
 
 ## Contribution
 
-Voir [`CONTRIBUTING.md`](CONTRIBUTING.md) pour les règles de travail, de documentation et de publication sur GitHub.
+Voir [`CONTRIBUTING.md`](CONTRIBUTING.md).

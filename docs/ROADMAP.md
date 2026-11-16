@@ -8,9 +8,10 @@ La roadmap est organisée en dix phases. Chaque phase doit être documentée, va
 - **Note :** pas de développement du moteur VPN, pas de workflow de build Android exécutable.
 
 ## Phase 1 — Fondations Android
-- **Objectif :** poser les bases du projet Android natif (Kotlin).
-- **Livrables attendus :** structure Gradle/module(s), configuration minimale, manifeste, squelette applicatif, préparation de l’intégration `VpnService` (sans moteur réel), outillage de base.
-- **Critères :** projet cohérent, documenté, buildable en CI lorsque la CI sera prête (cible Phase 9).
+- **Objectif :** poser les bases du projet Android natif (Kotlin), compilable et testable sur GitHub Actions.
+- **Livrables attendus :** structure Gradle/module(s), configuration minimale reproductible, manifeste, application lançable (Compose, navigation, écrans de base), préparation `VpnService` (sans moteur réel), modèles/données préparés (Room/DataStore), tests unitaires de base, workflow CI de validation.
+- **Critères :** projet cohérent, documenté, build et tests réussis sur GitHub Actions avec artefact APK debug disponible ; aucun moteur VPN/faux moteur, aucune simulation de connexion/statistiques.
+- **État :** implémentation préparée en dépôt, validation CI à confirmer après publication (voir `STATUS.md`).
 
 ## Phase 2 — Étude et intégration Xray
 - **Objectif :** étudier XTLS/Xray-core officiel et définir l’intégration **libXray**.

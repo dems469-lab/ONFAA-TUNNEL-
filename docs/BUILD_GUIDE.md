@@ -2,37 +2,60 @@
 
 ## Principe directeur
 
-La compilation du projet sera réalisée **exclusivement sur GitHub Actions**. Aucun binaire officiel ne doit être considéré comme produit par un build local non documenté comme référence, et aucun workflow de compilation Android incomplet ou trompeur ne doit être ajouté avant que les prérequis techniques ne soient réunis.
+La compilation et la validation du projet sont réalisées **exclusivement sur GitHub Actions**. Aucun binaire officiel ne doit être considéré comme produit par un build local non documenté comme référence. Aucun contournement masquant un échec (`|| true`, stub de bibliothèque moteur, etc.) n’est autorisé.
 
-## État actuel (Phase 0)
+## État Phase 1 (workflow de validation en place)
 
-- Le projet ne contient pas encore de module Android/Gradle buildable.
-- Aucun workflow de compilation n’est fourni dans `.github/workflows/` à ce stade (voir le README de ce dossier).
-- Les futures étapes de build seront définies lorsque les fondations Android (Phase 1) et l’intégration Xray/libXray (Phase 2) seront suffisamment spécifiées.
+Workflow : `.github/workflows/android.yml` (déclencheurs : `push`/`pull_request` sur `main`, `workflow_dispatch`).
 
-## Cible future (à détailler en Phase 9)
+Étapes principales :
+1. **Checkout** (`actions/checkout@v4`)
+2. **JDK 17** (Temurin, `actions/setup-java@v4`)
+3. **Android SDK** (`android-actions/setup-android@v3`)
+4. **Licences SDK** : `yes | sdkmanager --licenses`
+5. **Gradle** : `gradle/actions/setup-gradle@v4`
+6. **Validation du wrapper** : `gradle/actions/wrapper-validation@v4`
+7. **Tests unitaires** : `./gradlew :app:testDebugUnitTest --stacktrace`
+8. **Compilation debug** : `./gradlew :app:assembleDebug --stacktrace`
+9. **Artefact APK** : upload `app/build/outputs/apk/debug/*.apk` (`if-no-files-found: error`)
 
-La CI GitHub Actions devra, selon la maturité du projet :
+> Les résultats réels (succès/échec, durée, lien de run, disponibilité de l’artefact) doivent être consignés dans `STATUS.md` après exécution vérifiée.
 
-1. **Préparer l’environnement** : JDK compatible, Android SDK/NDK si requis par `libXray` ou le code natif, mise en cache des dépendances.
-2. **Restaurer les dépendances** : Gradle wrapper, artefacts `libXray`/Xray-core selon la stratégie validée.
-3. **Compiler** : assemblage des variantes définies (debug/release selon politique).
-4. **Tester** : exécution des tests unitaires et, si possible, instrumentés dans un environnement adapté.
-5. **Analyser** : lint/vérifications statiques pertinentes.
-6. **Publier des artefacts** : APK/AAB ou autres livrables, uniquement via des mécanismes GitHub Actions contrôlés.
+## Outils et versions épinglés (Phase 1)
+
+| Élément | Version / valeur |
+| --- | --- |
+| Gradle | 8.10.2 (wrapper) |
+| Android Gradle Plugin (AGP) | 8.7.3 |
+| Kotlin | 2.0.21 (plugin Compose) |
+| KSP | 2.0.21-1.0.28 |
+| JDK (CI) | 17 (Temurin) |
+| `compileSdk` / `targetSdk` | 35 |
+| `minSdk` | 26 |
+| Compose BOM | 2024.12.01 |
+| Navigation Compose | 2.8.5 |
+| Room | 2.6.1 |
+| DataStore Preferences | 1.1.1 |
+| Coroutines | 1.9.0 |
+
+Source de vérité : `gradle/libs.versions.toml`, `gradle/wrapper/gradle-wrapper.properties`, `app/build.gradle.kts`.
+
+## Build local (indicatif, non officiel)
+
+Un build local peut être tenté uniquement dans un environnement disposant d’un JDK 17 et d’un Android SDK compatibles (`./gradlew :app:testDebugUnitTest :app:assembleDebug`). L’absence de SDK dans certains environnements (ex. mobile) n’invalide pas la configuration si la CI GitHub Actions réussit.
 
 ## Secrets et signature
 
 - Aucun secret, keystore, mot de passe ou token ne doit être commité.
-- Si la signature de release est requise, les matériaux sensibles devront être fournis via les mécanismes sécurisés de GitHub (secrets/variables protégées) et documentés sans exposer de valeurs.
+- La signature release, si introduite ultérieurement, devra utiliser les secrets GitHub protégés et être documentée sans exposer de valeurs.
 
 ## Reproductibilité
 
-- Les versions d’outils (JDK, Gradle, SDK, NDK) devront être épinglées et documentées.
-- Toute dépendance binaire (notamment liée à Xray/libXray) devra être traçable (version, origine officielle, checksum si applicable).
+- Versions épinglées dans le catalogue et le wrapper.
+- Toute future dépendance binaire (notamment liée à Xray/libXray) devra être traçable (origine upstream officielle, version, checksums si applicable).
 
 ## Références
 
-- Roadmap : [`ROADMAP.md`](ROADMAP.md) (Phases 1, 2, 9)
+- Roadmap : [`ROADMAP.md`](ROADMAP.md)
 - Décisions : [`DECISIONS.md`](DECISIONS.md)
-- CI préparatoire : [`../.github/workflows/README.md`](../.github/workflows/README.md)
+- Séparation des composants : [`ANDROID_XRAY_SEPARATION.md`](ANDROID_XRAY_SEPARATION.md)

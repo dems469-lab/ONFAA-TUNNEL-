@@ -16,6 +16,18 @@ Ce document consigne les décisions prises, les hypothèses de travail et les ch
 | 2026-11-16 | Phase 0 = structure + documentation + préparation documentaire CI ; **pas** de workflow de build Android incomplet | Éviter les artefacts trompeurs |
 | 2026-11-16 | Licence **MIT** ajoutée au dépôt (choix initial de projet, révisable si le propriétaire en décide autrement) | Clarifier les conditions de réutilisation dès l’initialisation |
 
+## Décisions validées (Phase 1)
+
+| Date | Décision | Raison / portée |
+| --- | --- | --- |
+| 2026-11-16 | Package Android / `applicationId` : **`com.onfaa.tunnel`** (namespace identique) | Identité applicative cohérente et stable dès les fondations |
+| 2026-11-16 | Module unique **`:app`** (pas de multi-modules Gradle en Phase 1) | Réduire la complexité initiale ; réévaluation possible si le projet grandit |
+| 2026-11-16 | UI native avec **Jetpack Compose (Material 3)** et **Navigation Compose** | Interface moderne, déclarative, adaptée aux 5 écrans cibles |
+| 2026-11-16 | Organisation source par couches/features : `core/`, `data/`, `domain/`, `feature/*`, `ui/theme`, `vpn` | Séparation claire entre UI, données, domaine et préparation système VPN |
+| 2026-11-16 | Versions épinglées (catalogue) : AGP **8.7.3**, Kotlin **2.0.21**, KSP **2.0.21-1.0.28**, Gradle **8.10.2**, compile/target SDK **35**, minSdk **26**, JDK **17**, Compose BOM **2024.12.01**, Navigation **2.8.5**, Room **2.6.1**, DataStore **1.1.1**, Coroutines **1.9.0**, JUnit **4.13.2** | Reproductibilité et compatibilité maîtrisée (pas de `latest` flottant) |
+| 2026-11-16 | Workflow CI `android.yml` : setup-java/SDK, validation wrapper, `:app:testDebugUnitTest`, `:app:assembleDebug`, upload artefact APK (`if-no-files-found: error`) | Validation compilable/testable sur GitHub Actions sans masquer les échecs |
+| 2026-11-16 | `OnfaaTunnelVpnService` enregistré mais **sans tunnel** (arrêt immédiat en `onStartCommand`, aucune logique réseau/moteur) | Préparation `VpnService` conforme sans simulation de connexion |
+
 ## Choix techniques à confirmer
 
 | Sujet | Questions ouvertes | Phase cible |

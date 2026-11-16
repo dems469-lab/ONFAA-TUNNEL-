@@ -16,9 +16,11 @@ Ce plan définit les catégories de tests nécessaires au fil des phases. Les ou
 - **Revue documentaire :** absence d’affirmations mensongères (ex. build/connexion déjà implémentés).
 
 ### Phase 1 — Fondations Android
-- Compilation du squelette (localement si environnement disponible ; cible CI en Phase 9).
-- Tests unitaires de base sur la logique pure introduite.
-- Vérification des configurations Gradle/manifestes (lint basique quand disponible).
+- **CI (obligatoire pour validation)** : exécution de `:app:testDebugUnitTest` et `:app:assembleDebug` via `.github/workflows/android.yml`, avec artefact APK debug publié.
+- **Tests unitaires locaux/intégrés au module** : logique pure de base (ex. modèles domaine/préférences) — présents dans `app/src/test`.
+- **Tests instrumentés** : squelette présent dans `app/src/androidTest` (exécution selon disponibilité d’un environnement Android en CI/futur).
+- **Vérifications structurelles** : configuration Gradle/wrapper, manifeste, navigation Compose, écrans présents, bouton de connexion désactivé/non opérationnel, absence de moteur simulé ou de statistiques fictives.
+- **Résultats** : consignés dans `STATUS.md` et `CHANGELOG.md` après exécution réelle de la CI.
 
 ### Phase 2 — Étude et intégration Xray
 - Validation de la chaîne d’intégration `libXray` (chargement, appels minimaux) dans un environnement contrôlé.
