@@ -33,10 +33,13 @@ object XrayBridge {
             resolved?.let { return it }
             val classNames = listOf(
                 "libxray.Libxray",
+                "libxray.LibXray",
+                "libXray.Libxray",
                 "libXray.LibXray",
                 "go.libxray.Libxray",
-                "go.libXray.LibXray",
-                "libxray.LibXray"
+                "go.libxray.LibXray",
+                "go.libXray.Libxray",
+                "go.libXray.LibXray"
             )
             val errors = mutableListOf<String>()
             for (name in classNames) {

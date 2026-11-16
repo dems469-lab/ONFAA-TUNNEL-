@@ -20,7 +20,10 @@ env:
   LIBXRAY_COMMIT: 5a0f7d8d1c28b34afb5727b04b26a10f6dbac7e3
   XRAY_CORE_TAG: v26.11.9
   XRAY_CORE_COMMIT: 676eaf66f8f05d4d558ee7a74b4736623d3feeb9
-  NDK_VERSION: r30
+  # Exact NDK r30 stable package from the official Android SDK repository
+  # (repository2-3.xml: ndk;30.0.16248370 = NDK r30, non-preview).
+  NDK_PACKAGE: "ndk;30.0.16248370"
+  NDK_VERSION: "30.0.16248370"
   LIBXRAY_ANDROID_API: "21"
   # Pinned for reproducibility of gomobile tool resolution (build script resolves LIBXRAY_GOMOBILE_VERSION).
   LIBXRAY_GOMOBILE_VERSION: v0.0.0-20260217195705-b56b3793a9c4
@@ -64,13 +67,32 @@ jobs:
             echo "/usr/local/lib/android/sdk/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
           fi
 
-      - name: Set up Android NDK (pinned)
+      - name: Install pinned Android NDK r30 via official sdkmanager
         id: ndk
-        uses: nttld/setup-ndk@v1
-        with:
-          ndk-version: ${{ env.NDK_VERSION }}
-          add-to-path: true
-          local-cache: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          test -d "$SDK" || { echo "Android SDK not found at $SDK"; exit 1; }
+          export ANDROID_HOME="$SDK"
+          export ANDROID_SDK_ROOT="$SDK"
+          SDKMANAGER="$(command -v sdkmanager || echo "$SDK/cmdline-tools/latest/bin/sdkmanager")"
+          test -x "$SDKMANAGER" || { echo "sdkmanager not found"; exit 1; }
+          set +o pipefail
+          yes | "$SDKMANAGER" --sdk_root="$SDK" --licenses > /dev/null
+          set -o pipefail
+          "$SDKMANAGER" --sdk_root="$SDK" "$NDK_PACKAGE"
+          NDK_PATH="$SDK/ndk/$NDK_VERSION"
+          test -x "$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/clang" \
+            || { echo "NDK clang missing at $NDK_PATH"; exit 1; }
+          "$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/clang" --version
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=$NDK_PATH" >> "$GITHUB_ENV"
+          echo "ndk-path=$NDK_PATH" >> "$GITHUB_OUTPUT"
+          echo "$SDK/platform-tools" >> "$GITHUB_PATH"
+          echo "$SDK/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          echo "$NDK_PATH" >> "$GITHUB_PATH"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -96,6 +118,8 @@ jobs:
         run: |
           set -euo pipefail
           cd /tmp/libXray
+          echo "Go: $(go version)"
+          echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME"
           python3 build/main.py android
           test -f libXray.aar
           test -f libXray-sources.jar || true
@@ -125,6 +149,47 @@ jobs:
           set -euo pipefail
           test -s "$GITHUB_WORKSPACE/poc-report/abis.txt" && echo "ABIs detected" || (echo "No ABIs detected" && exit 1)
           grep -qi "invoke" "$GITHUB_WORKSPACE/poc-report/javap.txt"
+
+      - name: Publish PoC evidence to log and job summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          REPORT="$GITHUB_WORKSPACE/poc-report"
+          {
+            echo "## libXray Phase 2B — preuves d'exécution"
+            echo ""
+            echo "- Commit ONFAA : \`$GITHUB_SHA\`"
+            echo "- Commit libXray vérifié : \`$(cat "$GITHUB_WORKSPACE/libxray-commit.txt" 2>/dev/null || echo 'n/a')\`"
+            echo "- Go : \`$(go version)\`"
+            echo "- NDK : \`$ANDROID_NDK_HOME\`"
+            echo ""
+            echo "### SHA-256 AAR"
+            echo '```'
+            cat "$REPORT/aar.sha256"
+            cat "$REPORT/aar.size.txt" 2>/dev/null || true
+            echo '```'
+            echo "### ABIs présentes"
+            echo '```'
+            cat "$REPORT/abis.txt"
+            echo '```'
+            echo "### Fichiers natifs"
+            echo '```'
+            cat "$REPORT/jni.files.txt"
+            echo '```'
+            echo "### Signatures JVM contenant invoke"
+            echo '```'
+            cat "$REPORT/invoke_matches.txt" 2>/dev/null || echo "n/a"
+            echo '```'
+            echo "### Classes JVM générées (extrait)"
+            echo '```'
+            head -80 "$REPORT/classes.list.txt" 2>/dev/null || echo "n/a"
+            echo '```'
+            echo "### Segments LOAD (extrait)"
+            echo '```'
+            head -60 "$REPORT/load_segments.txt" 2>/dev/null || echo "n/a"
+            echo '```'
+          } | tee "$REPORT/summary.md"
+          cat "$REPORT/summary.md" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Run app unit tests
         shell: bash
