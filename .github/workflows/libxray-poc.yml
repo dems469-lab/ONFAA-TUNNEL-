@@ -394,7 +394,9 @@ jobs:
           disable-animations: true
           emulator-boot-timeout: 900
           script: |
-            set -euo pipefail
+            # The emulator-runner executes this script with /bin/sh (dash), which
+            # has no `set -o pipefail`; keep the script POSIX-compatible.
+            set -eu
             adb shell settings put global private_dns_mode off
             adb shell appops set com.onfaa.tunnel ACTIVATE_VPN allow || true
             ./gradlew :app:connectedDebugAndroidTest --stacktrace \
