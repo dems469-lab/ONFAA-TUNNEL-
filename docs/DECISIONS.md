@@ -36,16 +36,17 @@ Ce document consigne les décisions prises, les hypothèses de travail et les ch
 | 2026-11-16 | libXray upstream (release examinée) | `v26.11.9`, commit tag `5a0f7d8d1c28b34afb5727b04b26a10f6dbac7e3`, licence MIT, `go 1.27.3` | `docs/XRAY_UPSTREAM_AUDIT.md` |
 | 2026-11-16 | Alignement moteur | libXray dépend de `github.com/xtls/xray-core v1.260327.1-0.20261109052709-676eaf66f8f0` (correspondance v26.11.9) | `go.mod`, build script libXray |
 | 2026-11-16 | API libXray (contrat) | `Invoke` JSON, `apiVersion=3`, méthodes/cycle de vie/wrappers Android/CGo vérifiés dans le code (pas de signatures inventées) | `docs/LIBXRAY_API_REFERENCE.md` |
-| 2026-11-16 | Build Android officiel libXray | `python3 build/main.py android` (gomobile), défaut `LIBXRAY_ANDROID_API=21`, workflow officiel NDK r30, artefact release `libxray-android.zip` sha256 publié | `docs/XRAY_UPSTREAM_AUDIT.md` |
+| 2026-11-16 | Build Android officiel libXray | `python3 build/main.py android` (gomobile), `LIBXRAY_ANDROID_API=21`, NDK r30 **package exact `ndk;30.0.16248370`** installé via `sdkmanager`, Go `1.26.1`, gomobile `v0.0.0-20260217195705-b56b3793a9c4` | `.github/workflows/libxray-poc.yml` |
+| 2026-11-16 | Artefact PoC (vérifié) | AAR construit depuis source épinglée, SHA-256 `1655655c…d943d917`, 53 200 280 octets, ABIs `arm64-v8a/armeabi-v7a/x86/x86_64`, tous `LOAD` 16 KiB | `docs/LIBXRAY_ANDROID_POC.md` |
+| 2026-11-16 | Binding JVM réel | `libXray.LibXray` méthode **`public static native String invoke(String)`** (minuscule), runtime Go chargé par initialisation de classe | `javap` CI |
+| 2026-11-16 | Validation runtime | Tests instrumentés réels exécutés sur émulateur **x86_64 API 35** en CI : 6/6 succès, 0 ignoré | run `43965698249` |
 
 ## Choix techniques à confirmer / à compléter
 
 | Sujet | Questions ouvertes | Phase cible |
 | --- | --- | --- |
-| **Artefact d’intégration retenu** | Build from source en CI vs téléchargement release vérifié (SHA256) ; politique de stockage (pas de binaire non vérifié commité) | Phase 2 (PoC) / 3 |
-| **ABIs finales** | Preuve des ABIs incluses dans l’AAR v26.11.9 (inspection `jni/`), support arm64-v8a/armeabi-v7a/x86_64 selon besoins | Phase 2 (PoC) |
-| **Bindings JVM gomobile** | Noms de classes/méthodes exacts exposés à Kotlin pour `Invoke` et API Android | Phase 2 (PoC) / 3 |
-| **Gomobile/Go/NDK projet** | Épinglage définitif pour builds reproductibles ONFAA (aligné upstream) | Phase 2 (PoC) / 9 |
+| **Stockage de l’AAR** | Choix retenu : build from source en CI, AAR non commité (gitignore), injection vérifiée dans `app/libs` | Phase 2 (fait) / 9 |
+| **Exécution arm** | Valider `xrayVersion`/`invoke` sur appareil physique `arm64-v8a` (émulateur x86_64 seulement en CI) | Phase 3 |
 | **Formats d’import** | Liens/URI (vmess://, vless://, etc.), JSON, QR, presse-papiers ; règles de validation | Phase 4 |
 | **Modèle de données** | Schéma Room (profils, groupes, journaux), stratégie de migration | Phases 1–4 |
 | **Statistiques** | Sources (API Android, compteurs moteur/stats Xray), granularité, rétention | Phases 3, 6 |

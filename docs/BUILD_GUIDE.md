@@ -50,11 +50,13 @@ Source de vérité : `gradle/libs.versions.toml`, `gradle/wrapper/gradle-wrapper
 
 Un build local peut être tenté uniquement dans un environnement disposant d’un JDK 17 et d’un Android SDK compatibles (`./gradlew :app:testDebugUnitTest :app:assembleDebug`). L’absence de SDK dans certains environnements (ex. mobile) n’invalide pas la configuration si la CI GitHub Actions réussit.
 
-## Préparation intégration libXray (Phase 2 — stratégie, non implémentée)
+## Intégration libXray (Phase 2B — réalisée et validée)
 
 - **Sources officielles** : `XTLS/libXray` v26.11.9 (commit `5a0f7d8d1c28b34afb5727b04b26a10f6dbac7e3`), dépendance Xray-core v26.11.9 (`676eaf66…`) — voir `docs/XRAY_UPSTREAM_AUDIT.md`.
-- **Build officiel Android** : `python3 build/main.py android` (gomobile). Références CI upstream : Go stable, JDK, Android SDK/NDK (ex. r30), `LIBXRAY_ANDROID_API` (défaut 21).
-- **Reproductibilité cible** : épingler tag/commit, versions Go/gomobile/NDK, vérifier SHA256 des artefacts téléchargés (ex. `libxray-android.zip`) ou reconstruire depuis source taguée, conserver logs et artefacts, inspecter ABIs/contenu AAR.
+- **Build officiel Android** : `python3 build/main.py android` dans `.github/workflows/libxray-poc.yml`.
+- **Outils épinglés** : Go `1.26.1` (`GOTOOLCHAIN=auto`), JDK 17, gomobile `v0.0.0-20260217195705-b56b3793a9c4`, NDK r30 package `ndk;30.0.16248370` via `sdkmanager`, `LIBXRAY_ANDROID_API=21`.
+- **Flux** : clone + vérification du commit → build → inspection (SHA-256, ABIs, ELF, 16 KiB, `javap`) → intégration `app/libs/libXray.aar` (non commité) → tests unitaires, APK debug, APK androidTest → tests instrumentés réels sur émulateur x86_64 API 35 → artefacts.
+- **Résultats** : `docs/LIBXRAY_ANDROID_POC.md` (SHA-256, ABIs, signature `libXray.LibXray#invoke`, tests).
 - **Interdits** : téléchargement non vérifié, modification silencieuse upstream, `|| true`, intégration de binaire non tracé.
 
 ## Secrets et signature

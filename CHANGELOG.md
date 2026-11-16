@@ -6,16 +6,15 @@ Le format s’inspire de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/
 
 ## [Unreleased]
 
-### Phase 2 (audit réalisé ; Phase 2B PoC préparée, validation en attente)
+### Phase 2 — audit et intégration libXray officielle (TERMINÉE, validée en CI)
 - Audit des sources officielles XTLS/Xray-core v26.11.9 (commit `676eaf66…`, MPL-2.0) et XTLS/libXray v26.11.9 (commit `5a0f7d8…`, MIT), alignement de dépendance vérifié.
 - Ajout de `docs/XRAY_UPSTREAM_AUDIT.md` et `docs/LIBXRAY_API_REFERENCE.md`.
-- **Phase 2B (PoC validée en CI)** : workflow `libxray-poc.yml` (build officiel libXray v26.11.9 depuis commit épinglé, vérification commit, inspection AAR/ABIs/ELF/JVM, intégration `:app`, tests/build, artefacts), `XrayBridge` (Invoke apiVersion 3, appels hors UI), tests instrumentés réels, script `scripts/inspect_libxray_aar.sh`, doc `docs/LIBXRAY_ANDROID_POC.md`.
-- **Preuves CI** : run [#43959959254](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/43959959254) `success` (commit `f567fd7`), AAR construit/inspecté/intégré, `testDebugUnitTest`/`assembleDebug`/`assembleDebugAndroidTest` réussis, artefact `libxray-poc-report`.
-- **Limite** : tests instrumentés runtime non exécutés sur appareil/émulateur (compilés uniquement).
+- **Phase 2B** : workflow `libxray-poc.yml` (build officiel `python3 build/main.py android` depuis commit épinglé, vérification commit, NDK r30 `30.0.16248370`, inspection AAR/ABIs/ELF/16 KiB/`javap`, intégration `:app`, tests unitaires et instrumentés sur émulateur, artefacts), `XrayBridge` (API v3, appels hors UI, chargement natif explicite), tests instrumentés réels, script `scripts/inspect_libxray_aar.sh`, doc `docs/LIBXRAY_ANDROID_POC.md`.
+- **Preuves** : run final [#43965698249](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/43965698249) `success` (commit `f116442`) ; AAR SHA-256 `1655655c5dce1d45d2c065cf8db5373661badb4f0721a21db32e82d3d943d917` (53 200 280 octets), ABIs `arm64-v8a/armeabi-v7a/x86/x86_64`, ELF OK, tous `LOAD` alignés 16 KiB, signature JVM `libXray.LibXray#invoke(String):String` ; `testDebugUnitTest`/`assembleDebug`/`assembleDebugAndroidTest` réussis ; **6/6 tests instrumentés réels réussis sur émulateur x86_64 API 35 (0 ignoré)**.
+- **Limite résiduelle** : exécution native prouvée sur x86_64 émulé ; pas encore sur appareil physique arm64/armv7.
 
 ### À venir
-- PoC reproductible et vérifiée (artefact/source libXray épinglé, inspection ABIs, intégration minimale compilable si applicable).
-- Phases suivantes : voir [`docs/ROADMAP.md`](docs/ROADMAP.md).
+- **Phase 3** : connexion VPN réelle (`VpnService` + orchestration Xray/libXray), sans simulation ; validation sur appareil physique.
 
 ## [0.1.0-phase1] — 2026-11-16 (publié et validé en CI)
 

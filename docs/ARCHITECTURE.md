@@ -1,6 +1,6 @@
 # Architecture — ONFAA TUNNEL
 
-> Ce document décrit l’**architecture cible** et l’état des **fondations implémentées en Phase 1**. Les détails d’intégration `libXray` (signatures, types, cycle de vie exact) seront confirmés en Phase 2. Voir aussi [`ANDROID_XRAY_SEPARATION.md`](ANDROID_XRAY_SEPARATION.md).
+> Ce document décrit l’**architecture cible** et l’état des fondations implémentées. Les détails d’intégration `libXray` (signatures, types, cycle de vie exact) ont été confirmés en Phase 2 : voir [`LIBXRAY_ANDROID_POC.md`](LIBXRAY_ANDROID_POC.md). Voir aussi [`ANDROID_XRAY_SEPARATION.md`](ANDROID_XRAY_SEPARATION.md).
 
 ## État Phase 1 (implémenté/préparé)
 
@@ -11,11 +11,13 @@
 - **Tests** : unitaires JUnit dans `app/src/test`, squelette instrumenté dans `app/src/androidTest`.
 - **Moteur Xray/libXray** : **non intégré**.
 
-## État Phase 2 (audit/préparation)
+## État Phase 2 (intégration libXray validée en CI)
 
 - Audit upstream réalisé et documenté : `docs/XRAY_UPSTREAM_AUDIT.md`, `docs/LIBXRAY_API_REFERENCE.md`.
-- Versions/tags/commits de référence identifiés (Xray-core/libXray v26.11.9) et stratégie de build Android officielle analysée.
-- **Aucune intégration binaire/librairie libXray dans `:app`**, aucune PoC de compilation avec dépendance moteur, aucune connexion VPN réelle.
+- AAR **libXray v26.11.9** (`5a0f7d8…`) construit depuis source épinglée en CI, SHA-256 vérifié, ABIs `arm64-v8a/armeabi-v7a/x86/x86_64`, alignement 16 KiB, dépendances système uniquement.
+- **Binding réel** : `libXray.LibXray#invoke(String):String` (statique native), encapsulé dans `core/xray/XrayBridge` (API v3, hors thread UI, chargement natif explicite, runtime Go unique).
+- **Preuves** : compilation `:app` avec AAR, tests unitaires et **tests instrumentés réels réussis sur émulateur x86_64 API 35** (`invoke`, `xrayVersion`, erreurs) — voir `docs/LIBXRAY_ANDROID_POC.md`.
+- **Toujours absent** : établissement du tunnel VPN (`VpnService`/TUN), routage, états de connexion, statistiques (Phase 3+).
 
 ## Vue d’ensemble
 

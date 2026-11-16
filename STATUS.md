@@ -2,14 +2,14 @@
 
 ## État de phase
 
-- **Phase actuelle :** 2 — Audit technique et préparation de l'intégration upstream Xray-core
-- **État :** **substantiellement validée par PoC CI (build/intégration/compilation prouvés), avec une limite résiduelle** — artefact libXray officiel construit depuis sources épinglées, inspecté et intégré, compilation/tests possibles réussis en CI avec APK produit ; **tests instrumentés réels non exécutés sur appareil/émulateur** (compilés uniquement). La Phase 2 peut être considérée comme **clôturée sur le plan de l’intégration technique démontrée en CI**, sous réserve de cette limitation explicitement documentée.
+- **Phase actuelle :** 2 — Audit et intégration upstream Xray-core/libXray — **TERMINÉE**
+- **État :** **Phase 2 complète et démontrée en CI**, y compris l’exécution réelle de l’API native sur émulateur Android x86_64 (API 35) : AAR officiel construit depuis le commit épinglé, inspecté (SHA-256, ABIs, ELF, 16 KiB, `javap`), intégré à `:app`, APK compilé, et **6/6 tests instrumentés réussis sans aucun test ignoré** (`invoke` réel, `xrayVersion`, requêtes invalides, erreurs, absence de crash). Aucun tunnel VPN n’a été démarré.
 
 ## Références dépôt
 
 - **Dépôt :** https://github.com/dems469-lab/ONFAA-TUNNEL-
 - **Branche principale :** `main`
-- **Dernier commit publié (distant, vérifié avant travail Phase 2)** : `992b51b85ce46a6d5404932808b46a6bde3941b8` — *Phase 1: record successful CI validation and APK artifact*
+- **Dernier commit de code validé (distant)** : `f116442021b4e80508e3ef2448d21980f2207534` — *Phase 2B: force native runtime load in instrumented test*
 - **Dernier run CI Android réussi connu (Phase 1)** : [#43954661801](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/43954661801) (commit `22551de`, `success`, artefact `onfaa-tunnel-debug-apk`)
 
 ## Travaux réalisés (Phase 2 — audit/préparation)
@@ -29,33 +29,43 @@
 - **API** : `Invoke` (apiVersion 3), méthodes listées, cycle de vie `RunXray/StopXray/TestXray/GetXrayState/XrayVersion`, exports CGo, fonctions Android (`SetDNS`, `ResetDNS`, contrôleurs, `RegisterProcessFinder`) vérifiés dans le code source.
 - **Build Android officiel** : script `python3 build/main.py android` (gomobile), paramètres/NDK observés dans `build.yml` (NDK r30) ; checksum release `libxray-android.zip` relevé.
 
-## Points non vérifiés / non réalisés
+## Points vérifiés (Phase 2B) / limites
 
-- **Preuve de concept non engagée** : aucun artefact libXray téléchargé/vérifié/intégré dans l’app, aucune inspection d’ABIs `.so` réalisée, aucune compilation du projet Android avec dépendance libXray, aucune vérification d’accessibilité runtime de l’API depuis `:app`.
-- **ABIs effectives de l’AAR libXray** (arm64-v8a, armeabi-v7a, x86_64, etc.) : non prouvées par inspection d’un artefact v26.11.9.
-- **Bindings JVM exacts** générés par gomobile pour l’AAR : non extraits.
-- **Matrice Go/gomobile/NDK “finale” de projet** : stratégie documentée (références upstream) mais non figée par un build reproductible exécuté dans ce dépôt.
+**Vérifiés par preuves CI (run `43965698249`, commit `f116442`)** :
+
+- AAR officiel `libXray.aar` construit depuis `5a0f7d8d…` via `python3 build/main.py android` : **53 200 280 octets**, SHA-256 `1655655c5dce1d45d2c065cf8db5373661badb4f0721a21db32e82d3d943d917`.
+- ABIs réellement présentes : `arm64-v8a`, `armeabi-v7a`, `x86`, `x86_64` (`libgojni.so` par ABI).
+- Architectures ELF correctes pour les 4 ABIs ; **tous les segments `LOAD` alignés 16 KiB (`0x4000`)** ; dépendances `NEEDED` limitées à `liblog/libandroid/libdl/libc`.
+- API JVM réelle : `libXray.LibXray`, `public static native java.lang.String invoke(java.lang.String)`.
+- Intégration `:app` compilée : `assembleDebug`, `assembleDebugAndroidTest`, `testDebugUnitTest` en succès.
+- Tests instrumentés réels sur émulateur x86_64 API 35 : **6 tests, 0 échec, 0 ignoré**, dont chargement natif, `xrayVersion`, requête invalide, méthode inconnue et `testXray` invalide.
+
+**Limites résiduelles** :
+
+- Exécution native prouvée sur **x86_64 émulé** uniquement ; les binaires `arm64-v8a`/`armeabi-v7a` sont présents et vérifiés structurellement mais non exécutés sur appareil physique.
+- Aucun tunnel VPN, `VpnService` ou routage TUN (hors périmètre Phase 2B).
+- La valeur exacte de version retournée par `xrayVersion` n’est pas figée dans la doc (seul le contrat JSON, la non-nullité et le succès sont testés).
 
 ## Blocages / risques
 
-- Absence d’environnement Android/Go/gomobile local pour PoC ; validation dépend de GitHub Actions.
-- Téléchargement/usage d’artefacts volumineux nécessite vérification SHA256 stricte et politique claire (commit binaire vs fetch CI).
-- Risque d’intégration multi-runtime Go si d’autres bibliothèques Go étaient ajoutées (voir README libXray).
-- Détails ABI/alignement 16 Ko à confirmer sur binaires réels.
+- Validation du build libXray dépend de GitHub Actions (pas d’environnement Go/gomobile/NDK local sur le téléphone) ; le workflow est désormais reproductible et épinglé.
+- Risque d’intégration multi-runtime Go si d’autres bibliothèques Go étaient ajoutées (contrainte libXray : un seul runtime Go par processus) — aucune autre runtime Go n’est présente.
+- Les tests natifs n’ont pas été exécutés sur appareil physique arm64 ; à prévoir en Phase 3.
 
-## Phase 2B — PoC d’intégration (validée en CI)
+## Phase 2B — PoC d’intégration (TERMINÉE, validée en CI)
 
-- **Commit PoC publié** : `f567fd773746803abb691d14492bbe257bc09814` — *Phase 2B: fix PoC workflow Android SDK setup on CI runner*
-- **Run CI réussi** : [libXray Android PoC (Phase 2B) #43959959254](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/43959959254) (`completed/success`)
-- **Preuves CI** : checkout+vérification commit libXray `5a0f7d8d…`, build `python3 build/main.py android` (NDK r30, Go/gomobile épinglés dans workflow), génération+inspection AAR (SHA-256, ABIs, ELF/LOAD, `javap`/`invoke`), intégration dans `:app`, `:app:testDebugUnitTest`, `:app:assembleDebug`, `:app:assembleDebugAndroidTest`, artefact `libxray-poc-report`.
-- **Limite non levée** : tests instrumentés réels (chargement natif, `xrayVersion` runtime, etc.) **non exécutés** sur appareil/émulateur (APK de test compilé uniquement).
+- **Commit de code validé** : `f116442021b4e80508e3ef2448d21980f2207534` — *Phase 2B: force native runtime load in instrumented test*
+- **Run CI final réussi** : [libXray Android PoC (Phase 2B) #43965698249](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/43965698249) (`completed/success`, toutes les étapes).
+- **Preuves** : vérification du commit libXray `5a0f7d8d…`, build officiel (Go 1.26.1, NDK r30 `30.0.16248370`, gomobile épinglé), SHA-256/ABIs/ELF/16 KiB/`javap` conformes, AAR intégré, APKs debug + androidTest produits, tests unitaires et **6/6 tests instrumentés réels réussis sur émulateur x86_64 API 35**.
+- **Artefact** : `libxray-poc-report` (id `14276047955`, 122 092 534 octets).
+- **Détail complet** : `docs/LIBXRAY_ANDROID_POC.md`.
 
 ## Prochaine tâche
 
-- **Phase 3 — Connexion VPN réelle** (préparation contrôlée) : concevoir l’orchestration `VpnService` + moteur libXray/Xray-core réel, gestion permissions/cycle de vie/états/erreurs, en s’appuyant sur l’API et les contrôles Android vérifiés (sans simulation). Préalable recommandé : exécuter les tests instrumentés sur appareil/émulateur et consigner les résultats (SHA-256/ABIs/signatures exactes depuis l’artefact CI).
+- **Phase 3 — Connexion VPN réelle** : concevoir `VpnService` + orchestration du moteur Xray réel (permissions, cycle de vie, états, erreurs), sans simulation, en s’appuyant sur l’API vérifiée et en respectant le runtime Go unique. Prévoir des tests sur appareil physique arm64 avant toute annonce de connexion fonctionnelle.
 
 ## Instructions de reprise pour une autre IA
 
-1. Lire `STATUS.md`, `docs/XRAY_UPSTREAM_AUDIT.md`, `docs/LIBXRAY_API_REFERENCE.md`, `docs/DECISIONS.md`, `docs/BUILD_GUIDE.md`.
-2. Ne pas démarrer de connexion VPN réelle en Phase 2 ; ne pas intégrer de binaire/fork non vérifié ; ne pas inventer de signatures libXray.
-3. Toute intégration doit épingler tag/commit/SHA256 et conserver la traçabilité CI. Status: `main...origin/main` will change after commit/push — toujours vérifier distant et CI.
+1. Lire `STATUS.md`, `docs/LIBXRAY_ANDROID_POC.md`, `docs/XRAY_UPSTREAM_AUDIT.md`, `docs/LIBXRAY_API_REFERENCE.md`, `docs/DECISIONS.md`, `docs/BUILD_GUIDE.md`.
+2. La Phase 2 est clôturée : l’intégration réelle est prouvée. Ne pas régresser vers un mock/fork/sing-box ; conserver les versions et le SHA-256 documentés. Toute modification de l’intégration doit repasser le workflow `libxray-poc.yml`.
+3. Phase 3 seulement : aucun tunnel réel ne doit être annoncé « connecté » sans preuve observable sur appareil ; conserver la traçabilité CI et vérifier le commit distant après chaque push.

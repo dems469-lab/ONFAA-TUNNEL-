@@ -2,8 +2,8 @@
 
 ONFAA TUNNEL est un client VPN Android natif visant à fournir une connexion VPN réelle basée sur le cœur officiel **XTLS/Xray-core** (upstream : https://github.com/XTLS/Xray-core) via **libXray** (après vérification de compatibilité/API officielle).
 
-> **État actuel : Phase 2 — Audit technique upstream (en cours / partiellement réalisé).**  
-> Les fondations Android (Phase 1) sont validées en CI. Un audit des sources officielles **XTLS/Xray-core** et **XTLS/libXray** (versions/tags/commits, API, stratégie de build Android) est documenté. **Aucun moteur VPN, aucune connexion réelle, aucune dépendance libXray intégrée à l’app et aucune preuve de concept de build/compilation engagée dans le code à ce stade.**
+> **État actuel : Phase 2 terminée — intégration libXray officielle démontrée en CI.**  
+> Les fondations Android (Phase 1) sont validées en CI. L’AAR **libXray v26.11.9** est construit depuis le commit officiel épinglé, inspecté (SHA-256, ABIs, ELF, alignement 16 KiB, signature JVM), intégré à `:app`, et les tests instrumentés réels (`invoke`, `xrayVersion`, erreurs) passent sur émulateur Android. **Aucune connexion VPN réelle n’est encore établie** ; la Phase 3 reste à réaliser.
 
 ## Objectifs
 

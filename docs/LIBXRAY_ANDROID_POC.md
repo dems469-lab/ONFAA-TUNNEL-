@@ -1,6 +1,6 @@
 # Preuve de concept Android — intégration libXray officielle (Phase 2B)
 
-> **Statut** : **PoC exécutée avec succès en CI** (build officiel, inspection, intégration, compilation/tests possibles). Les preuves détaillées (SHA-256 de l’AAR, liste des ABIs, signatures JVM, segments ELF/LOAD) sont générées dans l’artefact `libxray-poc-report` du run CI (téléchargement via interface GitHub). Aucune connexion VPN réelle n’est démarrée et aucune statistique fictive n’est affichée. Les tests instrumentés réels sont **compilés** mais **non exécutés** sur appareil/émulateur dans ce workflow.
+> **Statut : PoC terminée et validée en CI le 2026-11-16**, y compris l’exécution des tests instrumentés réels sur émulateur Android x86_64 (API 35) : chargement du runtime natif Go, appel réel de `invoke`, `xrayVersion`, requêtes invalides et erreurs gérées sans crash. Aucune connexion VPN n’est démarrée dans cette phase, aucune statistique n’est simulée. Aucun fork ni binaire non vérifié n’est utilisé : l’AAR est construit depuis les sources officielles épinglées.
 
 ## 1. Versions upstream épinglées (inchangées)
 
@@ -11,78 +11,175 @@
 
 Dépendance Go épinglée par libXray : `github.com/xtls/xray-core v1.260327.1-0.20261109052709-676eaf66f8f0`.
 
+Le commit libXray effectivement checkouté en CI a été vérifié par `git rev-parse HEAD` :
+
+```
+5a0f7d8d1c28b34afb5727b04b26a10f6dbac7e3 build: pack Android relocations by LIBXRAY_ANDROID_API (#172)
+```
+
 ## 2. Méthode de compilation (reproductible, CI)
 
 Workflow : `.github/workflows/libxray-poc.yml`
 
+| Outil | Version/pin |
+|---|---|
+| Python | 3.x (`actions/setup-python@v5`) |
+| Go | **1.26.1** (`actions/setup-go@v5`, `GOTOOLCHAIN=auto`) |
+| gomobile | `LIBXRAY_GOMOBILE_VERSION=v0.0.0-20260217195705-b56b3793a9c4` (résolu par le script officiel) |
+| JDK | Temurin **17** |
+| Android SDK | SDK préinstallé du runner `ubuntu-24.04` |
+| Android NDK | package officiel `ndk;30.0.16248370` (NDK **r30** stable) installé via `sdkmanager` |
+| API Android cible du binding | `LIBXRAY_ANDROID_API=21` |
+
+Étapes réelles :
+
 1. Checkout ONFAA TUNNEL.
-2. Installation outils épinglés : Python 3.x, Go **1.26.1** (`actions/setup-go`, `GOTOOLCHAIN=auto`), JDK 17 (Temurin), Android SDK, Android NDK **r30**.
-3. Clone des sources officielles libXray, checkout du commit exact et vérification (`git rev-parse HEAD == LIBXRAY_COMMIT`).
-4. Build via script officiel : `python3 build/main.py android` (dans `/tmp/libXray`) avec `ANDROID_NDK_HOME` pointant vers NDK r30, `LIBXRAY_ANDROID_API=21`, `LIBXRAY_GOMOBILE_VERSION=v0.0.0-20260217195705-b56b3793a9c4`.
-5. Calcul SHA-256 de l’AAR, inspection du contenu, copie dans `app/libs/libXray.aar`.
-6. Vérifications : présence d’ABIs (`jni/`) et présence de signatures `invoke` dans les classes JVM générées.
-7. Tests/compilation app : `:app:testDebugUnitTest`, `:app:assembleDebug`, `:app:assembleDebugAndroidTest`.
-8. Publication des rapports et artefacts (AAR, APKs, rapports d’inspection).
+2. Installation des outils épinglés ci-dessus.
+3. Clone des sources officielles libXray, checkout du commit exact, vérification stricte de `git rev-parse HEAD`.
+4. Build via le script officiel : `python3 build/main.py android` avec `ANDROID_NDK_HOME` pointant sur `.../ndk/30.0.16248370`.
+5. Calcul SHA-256 et inspection de l’AAR, copie dans `app/libs/libXray.aar`.
+6. Vérifications bloquantes : ABIs présentes, architecture ELF par ABI, alignement 16 KiB des segments `LOAD`, signature JVM `invoke(String):String`.
+7. Build/tests app : `:app:testDebugUnitTest`, `:app:assembleDebug`, `:app:assembleDebugAndroidTest`, puis `:app:connectedDebugAndroidTest` sur émulateur x86_64 API 35.
+8. Publication des rapports et artefacts.
 
-> Les sources upstream ne sont pas modifiées silencieusement (checkout du commit officiel). Aucun téléchargement d’AAR précompilé non vérifié n’est utilisé ; la construction part des sources officielles épinglées.
+> Les sources upstream ne sont pas modifiées. Aucun AAR précompilé non vérifié n’est utilisé : l’artefact est construit à partir du commit officiel épinglé. L’**unique runtime Go** est celui embarqué dans l’AAR libXray (`libgojni.so`) ; aucun autre runtime Go n’est ajouté au processus.
 
-## 3. Intégration Android minimale
+## 3. Inspections réelles de l’artefact
 
-- **Dépendance** : `app/libs/*.aar` ajouté via `fileTree` dans `app/build.gradle.kts`.
+Exécutées par `scripts/inspect_libxray_aar.sh` en CI, résultats ci-dessous issus du run `43965698249`.
+
+### 3.1 Identité de l’AAR
+
+| Élément | Valeur vérifiée |
+|---|---|
+| Fichier produit | `libXray.aar` |
+| Taille | **53 200 280 octets** |
+| SHA-256 | **`1655655c5dce1d45d2c065cf8db5373661badb4f0721a21db32e82d3d943d917`** |
+| Copie intégrée | `app/libs/libXray.aar` (même SHA-256, revérifié après copie) |
+
+### 3.2 ABIs réellement présentes
+
+```
+arm64-v8a
+armeabi-v7a
+x86
+x86_64
+```
+
+Bibliothèque native unique par ABI : `jni/<ABI>/libgojni.so`.
+Aucune autre ABI n’est annoncée (aucune ABI supposée).
+
+### 3.3 Architectures ELF (vérifiées par `readelf -h`)
+
+| ABI | Classe | Machine | Résultat |
+|---|---|---|---|
+| `arm64-v8a` | ELF64 | AArch64 | OK |
+| `armeabi-v7a` | ELF32 | ARM | OK |
+| `x86` | ELF32 | Intel 80386 | OK |
+| `x86_64` | ELF64 | Advanced Micro Devices X86-64 | OK |
+
+### 3.4 Alignement mémoire 16 KiB (vérifié par `readelf -lW`)
+
+Tous les segments `LOAD` des quatre `libgojni.so` ont `align=0x4000` (16 KiB) : **12/12 segments OK**, marqueur final `ALL_LOAD_ALIGNED_16K`.
+
+### 3.5 Dépendances natives (`NEEDED`)
+
+Pour les quatre ABIs, uniquement des bibliothèques système Android :
+
+```
+liblog.so, libandroid.so, libdl.so, libc.so
+```
+
+Aucune dépendance native inattendue.
+
+### 3.6 API JVM réellement exposée
+
+`classes.jar` extrait de l’AAR inspecté avec `jar tf` et `javap -public`. Classe d’entrée réelle :
+
+```
+Compiled from "LibXray.java"
+public abstract class libXray.LibXray {
+  public static final long LibXrayAPIVersion;
+  public static void touch();
+  public static native java.lang.String invoke(java.lang.String);
+  public static native void registerDialerController(libXray.DialerController);
+  public static native void registerListenerController(libXray.DialerController);
+  public static native void registerProcessFinder(libXray.ProcessFinder, long);
+  public static native void resetDNS();
+  public static native void setDNS(libXray.DialerController, java.lang.String) throws java.lang.Exception;
+}
+```
+
+Points confirmés :
+
+- Signature JVM réelle : **`public static native java.lang.String invoke(java.lang.String)`** (méthode **statique**, nom **`invoke`** en minuscule, classe `libXray.LibXray`).
+- La fonction Go `Invoke(string) string` n’est donc pas exposée telle quelle : le binding gomobile renomme et génère une méthode statique native.
+- Les modèles (`LibXrayInvokeRequest`, `XrayVersionResponse`, `TestXrayRequest`, etc.) sont présents dans le package JVM `libXray`.
+- Le chargement du runtime Go est assuré par l’initialisation statique de la classe générée (helpers `go.Seq`, `touch()`), pas par un `System.loadLibrary` manuel côté app.
+
+## 4. Intégration Android minimale
+
+- **Dépendance** : `app/libs/*.aar` via `fileTree` dans `app/build.gradle.kts` (AAR ignoré par Git, injecté par la CI après vérification).
 - **Bridge** : `com.onfaa.tunnel.core.xray.XrayBridge`
-  - Résolution de l’API réelle `Invoke(String):String` par réflexion (compatible avec le nommage réel généré par gomobile).
-  - Construction de requêtes JSON conformes à `apiVersion=3`.
-  - Décodage des réponses `{success,data,error}`.
-  - Exécution des appels via `Dispatchers.Default` (pas d’appel bloquant UI prévu).
-  - **Aucun** démarrage de tunnel VPN, aucune simulation de connexion/statistiques.
-- **Contrainte runtime Go unique** : respectée côté conception (une seule bibliothèque Go/native intégrée via l’AAR libXray ; aucune autre runtime Go indépendant ajouté).
+  - résout la méthode réelle `invoke(String):String` par réflexion sur la classe générée (`libXray.LibXray`) ;
+  - force l’initialisation de la classe pour charger `libgojni.so` (`loadNativeLibrary()`) ;
+  - construit des requêtes conformes à `apiVersion=3` : `{"apiVersion":3,"method":"…","payload":{…}}` ;
+  - décode les réponses `{success,data,error}` ;
+  - limite les requêtes à 16 MiB (limite officielle libXray) ;
+  - exécute les appels réels hors thread UI (`Dispatchers.Default`) ;
+  - **ne démarre aucun tunnel**, n’affiche aucun état « connecté », ne produit aucune statistique simulée.
 
-## 4. Tests de preuve (code ajouté)
+## 5. Tests exécutés
 
-**Instrumentés (appareil/émulateur requis, artefact réel)** : `app/src/androidTest/java/com/onfaa/tunnel/core/xray/XrayBridgeInstrumentedTest.kt`
-- Disponibilité de l’API `Invoke` (résolution de signature).
-- Appel réel `xrayVersion` (JSON valide, `success=true`, version non vide).
-- Requête invalide → réponse d’erreur structurée (sans crash).
-- Méthode inconnue → erreur structurée.
-- `testXray` avec configuration invalide → échec géré (sans crash).
+### 5.1 Tests unitaires JVM
 
-> Si l’AAR n’est pas bundlé, les tests instrumentés sont ignorés via `Assume` (à ne pas interpréter comme succès de la preuve). L’exécution sur émulateur/appareil réel n’est pas automatisée dans ce workflow ; les APKs de test sont compilés et publiés comme preuve de compilabilité.
+`:app:testDebugUnitTest` — **succès** (tests existants du domaine, sans natif).
 
-**Unitaires (JVM, sans natif)** : tests existants conservés et exécutés en CI (`:app:testDebugUnitTest`).
+### 5.2 Tests instrumentés réels (artefact réel, émulateur)
 
-## 5. Inspection AAR (script)
+Exécutés par `:app:connectedDebugAndroidTest` sur **émulateur `emulator-5554`, API 35, x86_64**. Résultat XML :
 
-`scripts/inspect_libxray_aar.sh` produit dans le rapport :
-- SHA-256 et taille de l’AAR, listing du contenu.
-- Liste des ABIs (`jni/<ABI>/`) et fichiers natifs.
-- Informations ELF / segments LOAD (`readelf`) pour analyse d’alignement (16 Ko à vérifier sur les `LOAD`).
-- Extraction de `classes.jar`, `javap -public` et correspondances `invoke`.
+```
+tests="6" failures="0" errors="0" skipped="0"
+```
 
-## 6. Résultats d’exécution CI (réels, vérifiés)
+| Test (classe `XrayBridgeInstrumentedTest`) | Résultat |
+|---|---|
+| `nativeLibraryAndInvokeApiAvailable` — chargement effectif du runtime natif + API `invoke` | **PASS** |
+| `xrayVersionReturnsValidJsonAndSuccess` — appel réel `xrayVersion`, JSON valide, `success=true`, version non vide | **PASS** |
+| `invalidRequestIsHandledAsErrorResponse` — requête sans méthode → erreur structurée, pas de crash | **PASS** |
+| `unknownMethodReturnsStructuredError` — méthode inconnue → erreur structurée | **PASS** |
+| `testXrayRejectsInvalidConfigWithoutCrash` — configuration Xray invalide → échec géré, pas de crash | **PASS** |
+
+Le test `ExampleInstrumentedTest.useAppContext` (template) passe également. Total : **6 tests, 0 échec, 0 ignoré**.
+
+## 6. Résultats CI et artefacts
 
 | Élément | Résultat |
 |---|---|
-| Workflow / run URL | [libXray Android PoC (Phase 2B) #43959959254](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/43959959254) — `completed / success` |
-| Commit ONFAA (validé par ce run) | `f567fd773746803abb691d14492bbe257bc09814` — *Phase 2B: fix PoC workflow Android SDK setup on CI runner* |
-| Commit libXray vérifié (checkout CI) | `5a0f7d8d1c28b34afb5727b04b26a10f6dbac7e3` (étape “Clone and verify libXray pinned commit” réussie) |
-| SHA-256 `libXray.aar` | Calculé et enregistré dans `poc-report/aar.sha256` (artefact CI `libxray-poc-report`) |
-| ABIs détectées | Extraites dans `poc-report/abis.txt` ; étape “Verify AAR contains native libs and Invoke binding” réussie (ABIs présentes) |
-| Inspection ELF / alignement 16 Ko | Générée dans `poc-report/elf.txt` et `poc-report/load_segments.txt` (interprétation détaillée via artefact) |
-| Signatures JVM `Invoke` | `classes.jar` inspecté (`javap -public`), correspondances dans `poc-report/invoke_matches.txt` ; étape de vérification `invoke` réussie |
-| `:app:testDebugUnitTest` | **Succès** |
-| `:app:assembleDebug` (avec `app/libs/libXray.aar` intégré) | **Succès** |
-| `:app:assembleDebugAndroidTest` (tests réels compilés) | **Succès** |
-| APK debug / artefacts publiés | Inclus dans l’artefact CI [`libxray-poc-report` (14273602500)](https://api.github.com/repos/dems469-lab/ONFAA-TUNNEL-/actions/artifacts/14273602500/zip) (téléchargement via interface GitHub) |
-| Tests instrumentés exécutés sur appareil/émulateur | **Non exécutés** (pas d’émulateur/appareil provisionné dans le workflow) ; code de test présent et compilé |
+| Run final | [libXray Android PoC (Phase 2B) #43965698249](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/43965698249) — `completed / success` |
+| Commit ONFAA validé | `f116442021b4e80508e3ef2448d21980f2207534` |
+| Commit libXray vérifié | `5a0f7d8d1c28b34afb5727b04b26a10f6dbac7e3` |
+| Go / NDK | `go1.26.1 linux/amd64` / `30.0.16248370` |
+| SHA-256 AAR | `1655655c5dce1d45d2c065cf8db5373661badb4f0721a21db32e82d3d943d917` |
+| ABIs | `arm64-v8a`, `armeabi-v7a`, `x86`, `x86_64` |
+| ELF / 16 KiB / NEEDED | OK (voir §3) |
+| Signature JVM | `libXray.LibXray#invoke(java.lang.String):java.lang.String` (static native) |
+| `:app:testDebugUnitTest` | succès |
+| `:app:assembleDebug` (avec AAR intégré) | succès |
+| `:app:assembleDebugAndroidTest` | succès |
+| Tests instrumentés émulateur | **6/6 succès, 0 ignoré** |
+| Artefact CI | [`libxray-poc-report` id `14276047955`](https://api.github.com/repos/dems469-lab/ONFAA-TUNNEL-/actions/artifacts/14276047955/zip), 122 092 534 octets (AAR, APK debug, APK androidTest, rapports, `javap`, ELF, résultats de tests) |
+| APK debug | produit avec l’AAR réellement intégré (`app/build/outputs/apk/debug/`) |
+| APK androidTest | produit (`app/build/outputs/apk/androidTest/debug/`) |
 
-**Preuves clés apportées par la CI** : build officiel `python3 build/main.py android` depuis sources épinglées, vérification du commit libXray, production de l’AAR, inspection automatisée, intégration dans `:app`, compilation Android réussie avec dépendance réelle, et exécution des tests unitaires JVM du module. **Limite restante** : exécution runtime des tests instrumentés contre le binaire natif sur appareil/émulateur non réalisée.
+## 7. Limitations et points non couverts
 
-## 7. Limitations et points à valider
-
-- Exécution réelle des tests instrumentés (`xrayVersion`, gestion d’erreurs, chargement natif) requiert un appareil/émulateur Android avec l’APK de test et l’APK debug intégrant l’AAR.
-- Les ABIs et l’alignement 16 Ko doivent être interprétés à partir du rapport ELF/LOAD produit par la CI.
-- La version Go utilisée en CI (1.26.1 + `GOTOOLCHAIN=auto`) est choisie pour reproductibilité de l’environnement runner ; la compatibilité effective avec `go.mod` upstream doit être confirmée par le succès du build.
-- Aucune intégration de `VpnService`/tunnel ; aucune API de stats/connexion exposée à l’UI.
+- Les tests instrumentés ont été exécutés sur **émulateur x86_64 API 35**, pas sur appareil physique arm64/armv7 : le chargement natif est prouvé pour x86_64 ; les binaires arm sont présents et vérifiés structurellement (ELF/16 KiB) mais non exécutés dans cette CI.
+- Aucun tunnel VPN, aucun `VpnService`, aucun routage TUN : hors périmètre Phase 2B.
+- Aucune statistique de trafic, aucun état de connexion simulé.
+- La version Xray retournée est vérifiée non vide et le JSON est valide ; la valeur exacte n’est pas figée dans ce document.
+- L’inspection dépend de l’artefact CI `libxray-poc-report` pour les rapports complets (`javap.txt`, `elf.txt`, etc.) ; les éléments clés sont reproduits ci-dessus et dans la page *Summary* du run.
 
 ## 8. Références
 
@@ -91,3 +188,4 @@ Workflow : `.github/workflows/libxray-poc.yml`
 - `.github/workflows/libxray-poc.yml`
 - `scripts/inspect_libxray_aar.sh`
 - `app/src/main/java/com/onfaa/tunnel/core/xray/XrayBridge.kt`
+- `app/src/androidTest/java/com/onfaa/tunnel/core/xray/XrayBridgeInstrumentedTest.kt`

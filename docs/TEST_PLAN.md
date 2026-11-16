@@ -24,9 +24,16 @@ Ce plan définit les catégories de tests nécessaires au fil des phases. Les ou
 
 ### Phase 2 — Étude et intégration Xray
 - **Audit (réalisé)** : vérification des tags/commits/licences/dépendances et de l’API source pour Xray-core et libXray ; documentation dans `docs/XRAY_UPSTREAM_AUDIT.md` et `docs/LIBXRAY_API_REFERENCE.md`.
-- **À réaliser pour clôturer la validation technique** : PoC CI reproductible (artefact/source épinglé + vérification SHA256 ou build officiel), inspection des ABIs/contenu de l’AAR, compilation du projet avec intégration minimale et preuve d’accessibilité de l’API (sans démarrage de tunnel).
-- Tests de non-régression build Android existant après toute intégration.
-- Documentation des prérequis runtime (ABI, versions Android/NDK/Go/gomobile) confirmés par preuves.
+- **PoC CI (réalisée, run [#43965698249](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/43965698249))** : build officiel depuis le commit épinglé, SHA-256, ABIs, ELF, alignement 16 KiB, signature JVM, intégration `:app`, APK debug/androidTest.
+- **Tests unitaires JVM** : `:app:testDebugUnitTest` — succès.
+- **Tests instrumentés réels (émulateur x86_64 API 35)** : `:app:connectedDebugAndroidTest` — **6 tests, 0 échec, 0 ignoré** :
+  - chargement effectif du runtime natif (`libgojni.so`) et disponibilité de `invoke` ;
+  - appel réel `xrayVersion` (JSON valide, `success=true`, version non vide) ;
+  - requête invalide (`apiVersion` seul) → erreur structurée sans crash ;
+  - méthode inconnue → erreur structurée ;
+  - `testXray` avec configuration invalide → échec géré sans crash.
+- **Limite** : pas d’exécution sur appareil physique arm64/armv7 ; pas de tunnel VPN en Phase 2.
+- Documentation : `docs/LIBXRAY_ANDROID_POC.md`.
 
 ### Phase 3 — Connexion VPN réelle
 - **Tests fonctionnels manuels** sur appareil réel : démarrage/arrêt du tunnel, maintien de session, comportement à la perte réseau, reconnexion si implémentée.
