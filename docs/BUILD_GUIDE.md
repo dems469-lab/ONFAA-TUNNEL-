@@ -50,6 +50,13 @@ Source de vérité : `gradle/libs.versions.toml`, `gradle/wrapper/gradle-wrapper
 
 Un build local peut être tenté uniquement dans un environnement disposant d’un JDK 17 et d’un Android SDK compatibles (`./gradlew :app:testDebugUnitTest :app:assembleDebug`). L’absence de SDK dans certains environnements (ex. mobile) n’invalide pas la configuration si la CI GitHub Actions réussit.
 
+## Préparation intégration libXray (Phase 2 — stratégie, non implémentée)
+
+- **Sources officielles** : `XTLS/libXray` v26.11.9 (commit `5a0f7d8d1c28b34afb5727b04b26a10f6dbac7e3`), dépendance Xray-core v26.11.9 (`676eaf66…`) — voir `docs/XRAY_UPSTREAM_AUDIT.md`.
+- **Build officiel Android** : `python3 build/main.py android` (gomobile). Références CI upstream : Go stable, JDK, Android SDK/NDK (ex. r30), `LIBXRAY_ANDROID_API` (défaut 21).
+- **Reproductibilité cible** : épingler tag/commit, versions Go/gomobile/NDK, vérifier SHA256 des artefacts téléchargés (ex. `libxray-android.zip`) ou reconstruire depuis source taguée, conserver logs et artefacts, inspecter ABIs/contenu AAR.
+- **Interdits** : téléchargement non vérifié, modification silencieuse upstream, `|| true`, intégration de binaire non tracé.
+
 ## Secrets et signature
 
 - Aucun secret, keystore, mot de passe ou token ne doit être commité.

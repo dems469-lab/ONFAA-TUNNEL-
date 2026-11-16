@@ -9,7 +9,13 @@
 - **VPN (préparation)** : `OnfaaTunnelVpnService` (extends `VpnService`) déclaré dans le manifeste avec permissions préparatoires ; **aucun tunnel, aucun moteur**.
 - **Données (préparation)** : modèles domaine (`domain/model`), Room (`data/local/db` : entité, DAO, `OnfaaDatabase`), DataStore (`data/preferences/UserPreferencesRepository`), constantes (`core/AppConstants`).
 - **Tests** : unitaires JUnit dans `app/src/test`, squelette instrumenté dans `app/src/androidTest`.
-- **Moteur Xray/libXray** : **non intégré** (interdit en Phase 1).
+- **Moteur Xray/libXray** : **non intégré**.
+
+## État Phase 2 (audit/préparation)
+
+- Audit upstream réalisé et documenté : `docs/XRAY_UPSTREAM_AUDIT.md`, `docs/LIBXRAY_API_REFERENCE.md`.
+- Versions/tags/commits de référence identifiés (Xray-core/libXray v26.11.9) et stratégie de build Android officielle analysée.
+- **Aucune intégration binaire/librairie libXray dans `:app`**, aucune PoC de compilation avec dépendance moteur, aucune connexion VPN réelle.
 
 ## Vue d’ensemble
 

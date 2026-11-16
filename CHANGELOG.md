@@ -6,8 +6,14 @@ Le format s’inspire de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/
 
 ## [Unreleased]
 
+### Phase 2 (audit en cours, non entièrement clôturée)
+- Audit des sources officielles XTLS/Xray-core v26.11.9 (commit `676eaf66…`, MPL-2.0) et XTLS/libXray v26.11.9 (commit `5a0f7d8…`, MIT), alignement de dépendance vérifié.
+- Ajout de `docs/XRAY_UPSTREAM_AUDIT.md` et `docs/LIBXRAY_API_REFERENCE.md` (API/méthodes vérifiées, stratégie build Android/CI, références).
+- Mises à jour documentation (README, STATUS, ARCHITECTURE, DECISIONS, ROADMAP, BUILD_GUIDE, TEST_PLAN).
+- **Non réalisé** : preuve de concept d’intégration/compilation libXray dans le projet, inspection ABI sur artefact vérifié, validation CI dédiée.
+
 ### À venir
-- Phase 2 : étude et préparation de l’intégration XTLS/Xray-core upstream via libXray (sans intégration approximative).
+- PoC reproductible et vérifiée (artefact/source libXray épinglé, inspection ABIs, intégration minimale compilable si applicable).
 - Phases suivantes : voir [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ## [0.1.0-phase1] — 2026-11-16 (publié et validé en CI)

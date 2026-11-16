@@ -2,8 +2,8 @@
 
 ONFAA TUNNEL est un client VPN Android natif visant à fournir une connexion VPN réelle basée sur le cœur officiel **XTLS/Xray-core** (upstream : https://github.com/XTLS/Xray-core) via **libXray** (après vérification de compatibilité/API officielle).
 
-> **État actuel : Phase 1 — Fondations Android natives (en cours de validation CI).**  
-> Une application Android native (Kotlin, Jetpack Compose, navigation 5 écrans) et une base de données/préférences sont préparées. **Aucun moteur VPN, aucune connexion réelle, aucun binaire Xray/libXray et aucune statistique fictive ne sont intégrés.**
+> **État actuel : Phase 2 — Audit technique upstream (en cours / partiellement réalisé).**  
+> Les fondations Android (Phase 1) sont validées en CI. Un audit des sources officielles **XTLS/Xray-core** et **XTLS/libXray** (versions/tags/commits, API, stratégie de build Android) est documenté. **Aucun moteur VPN, aucune connexion réelle, aucune dépendance libXray intégrée à l’app et aucune preuve de concept de build/compilation engagée dans le code à ce stade.**
 
 ## Objectifs
 
@@ -31,6 +31,8 @@ Versions épinglées et choix documentés dans [`docs/DECISIONS.md`](docs/DECISI
 - Package Android : `com.onfaa.tunnel` (`applicationId` identique)
 - Suivi : [`STATUS.md`](STATUS.md), [`CHANGELOG.md`](CHANGELOG.md), [`docs/ROADMAP.md`](docs/ROADMAP.md)
 - Séparation des responsabilités : [`docs/ANDROID_XRAY_SEPARATION.md`](docs/ANDROID_XRAY_SEPARATION.md)
+- Audit upstream (Phase 2) : [`docs/XRAY_UPSTREAM_AUDIT.md`](docs/XRAY_UPSTREAM_AUDIT.md)
+- Référence API libXray vérifiée : [`docs/LIBXRAY_API_REFERENCE.md`](docs/LIBXRAY_API_REFERENCE.md)
 
 ## Structure du projet
 

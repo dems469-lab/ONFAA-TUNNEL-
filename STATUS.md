@@ -2,55 +2,55 @@
 
 ## État de phase
 
-- **Phase actuelle :** 1 — Fondations Android natives
-- **État :** **terminée (validée par compilation et tests réussis sur GitHub Actions, artefact APK debug publié)**
+- **Phase actuelle :** 2 — Audit technique et préparation de l'intégration upstream Xray-core
+- **État :** **partiellement réalisée (audit documentaire et préparation consignés ; preuve de concept d’intégration/compilation non engagée)** — la Phase 2 ne peut pas être déclarée entièrement terminée car la PoC (artefact libXray vérifié, inspection ABI, accessibilité API depuis le projet Android, compilation avec intégration) n’a pas été exécutée dans le dépôt/CI.
 
 ## Références dépôt
 
 - **Dépôt :** https://github.com/dems469-lab/ONFAA-TUNNEL-
 - **Branche principale :** `main`
-- **Dernier commit Phase 1 publié et validé en CI :** `22551dee3d00b7f33413552ad0cb60ccceb27618` — *CI: rely on preinstalled Android SDK for Phase 1 validation*
-- **Commits Phase 1 publiés (distants, vérifiés)** :
-  - `287b5df4216788bd25368efe6f827823915e3a3d` — *Phase 1: add Android foundations, CI validation workflow, and documentation* (CI run #1 : échec à l’étape « Set up Android SDK »)
-  - `554a590729196e8d310cb32480e5eddc254f49f0` — *Fix Android CI workflow to use runner SDK without setup-android failure* (CI run #2 : échec à l’étape « Accept Android SDK licenses and install required components »)
-  - `22551dee3d00b7f33413552ad0cb60ccceb27618` — *CI: rely on preinstalled Android SDK for Phase 1 validation* (CI run #3 : **succès**)
+- **Dernier commit publié (distant, vérifié avant travail Phase 2)** : `992b51b85ce46a6d5404932808b46a6bde3941b8` — *Phase 1: record successful CI validation and APK artifact*
+- **Dernier run CI Android réussi connu (Phase 1)** : [#43954661801](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/43954661801) (commit `22551de`, `success`, artefact `onfaa-tunnel-debug-apk`)
 
-## Validation GitHub Actions (réelle)
+## Travaux réalisés (Phase 2 — audit/préparation)
 
-- **Run réussi :** [Android CI #43954661801](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/43954661801) — statut `completed`, conclusion `success` (commit `22551de`, branche `main`).
-- **Étapes clés réussies :** checkout, JDK 17, setup Gradle, validation wrapper, `:app:testDebugUnitTest`, `:app:assembleDebug`, upload artefact.
-- **Artefact APK :** `onfaa-tunnel-debug-apk` (disponible sur la page du run, non expiré au moment de la vérification API).
+- Inspection du dépôt ONFAA TUNNEL et de l’état Phase 1.
+- Audit des dépôts officiels **XTLS/Xray-core** et **XTLS/libXray** (releases/tags/commits, licences, go.mod, build scripts, API invoke, wrappers Android, workflows CI).
+- Sélection documentée (alignée sur les dernières releases stables examinées) :
+  - **Xray-core** `v26.11.9`, commit tag **`676eaf66f8f05d4d558ee7a74b4736623d3feeb9`** (MPL-2.0), `go 1.27`
+  - **libXray** `v26.11.9`, tag annoté commit **`5a0f7d8d1c28b34afb5727b04b26a10f6dbac7e3`** (MIT), `go 1.27.3`, dépend `github.com/xtls/xray-core v1.260327.1-0.20261109052709-676eaf66f8f0`
+- Documentation créée : `docs/XRAY_UPSTREAM_AUDIT.md`, `docs/LIBXRAY_API_REFERENCE.md` (méthodes/API vérifiées uniquement, sans signatures inventées).
+- Mise à jour de la documentation projet (README, ARCHITECTURE, DECISIONS, ROADMAP, BUILD_GUIDE, TEST_PLAN, CHANGELOG).
 
-## Travaux terminés (Phase 1)
+## Vérifications effectuées (Phase 2)
 
-- Structure Android/Gradle complète : module `:app`, `settings.gradle.kts`, `build.gradle.kts`, `gradle.properties`, `gradle/libs.versions.toml`, wrapper Gradle commité.
-- Application native Kotlin/Compose : activité principale, thème Material 3, navigation Compose, 5 écrans (Accueil, Configurations, Statistiques, Journaux, Paramètres).
-- Bouton de connexion **désactivé** et explicitement non opérationnel ; **aucun état de connexion, aucun tunnel, aucune statistique fictive**.
-- Préparation VPN : manifeste/permissions et `com.onfaa.tunnel.vpn.OnfaaTunnelVpnService` (aucun établissement de tunnel).
-- Préparation données : modèles domaine, Room (entité/DAO/base) et dépôt DataStore de préférences.
-- Tests unitaires JUnit de base (`app/src/test`) et squelette instrumenté (`app/src/androidTest`).
-- CI Android opérationnelle sur GitHub Actions avec artefact debug produit.
-- Documentation mise à jour (architecture, build, tests, décisions, roadmap, séparation app/VpnService/moteur upstream).
+- **Origine upstream** : dépôts officiels XTLS confirmés ; tags/releases/commits récupérés via GitHub API et fichiers bruts aux tags.
+- **Compatibilité libXray/Xray-core** : alignement vérifié par dépendance Go/pseudo-version et documentation libXray pour v26.11.9.
+- **API** : `Invoke` (apiVersion 3), méthodes listées, cycle de vie `RunXray/StopXray/TestXray/GetXrayState/XrayVersion`, exports CGo, fonctions Android (`SetDNS`, `ResetDNS`, contrôleurs, `RegisterProcessFinder`) vérifiés dans le code source.
+- **Build Android officiel** : script `python3 build/main.py android` (gomobile), paramètres/NDK observés dans `build.yml` (NDK r30) ; checksum release `libxray-android.zip` relevé.
 
-## Travaux non commencés
+## Points non vérifiés / non réalisés
 
-- Intégration du moteur **XTLS/Xray-core** upstream et de **libXray** (Phase 2+), connexion VPN réelle (Phase 3).
-- Import/parsing réel des configurations VLESS/VMess et UI de gestion complète (Phase 4+).
-- Statistiques/journaux/diagnostics réels, réglages DNS/routage effectifs (Phases 6–7).
-- Renforcement qualité/sécurité et CI/CD de livraison avancée (Phases 8–9).
+- **Preuve de concept non engagée** : aucun artefact libXray téléchargé/vérifié/intégré dans l’app, aucune inspection d’ABIs `.so` réalisée, aucune compilation du projet Android avec dépendance libXray, aucune vérification d’accessibilité runtime de l’API depuis `:app`.
+- **ABIs effectives de l’AAR libXray** (arm64-v8a, armeabi-v7a, x86_64, etc.) : non prouvées par inspection d’un artefact v26.11.9.
+- **Bindings JVM exacts** générés par gomobile pour l’AAR : non extraits.
+- **Matrice Go/gomobile/NDK “finale” de projet** : stratégie documentée (références upstream) mais non figée par un build reproductible exécuté dans ce dépôt.
 
-## Blocages
+## Blocages / risques
 
-- Aucun blocage bloquant la clôture de la Phase 1. Limite connue : aucune exécution locale complète du build Android dans cet environnement (SDK absent) ; la preuve de compilation repose sur GitHub Actions.
+- Absence d’environnement Android/Go/gomobile local pour PoC ; validation dépend de GitHub Actions.
+- Téléchargement/usage d’artefacts volumineux nécessite vérification SHA256 stricte et politique claire (commit binaire vs fetch CI).
+- Risque d’intégration multi-runtime Go si d’autres bibliothèques Go étaient ajoutées (voir README libXray).
+- Détails ABI/alignement 16 Ko à confirmer sur binaires réels.
 
 ## Prochaine tâche
 
-- **Phase 2 — Étude et intégration Xray** : analyser XTLS/Xray-core upstream et les options d’intégration **libXray** (compatibilité, API officielle, artefacts), sans intégrer de binaire/fork approximatif et sans inventer de signatures ; documenter les choix dans `docs/DECISIONS.md`.
+1. Définir et exécuter une PoC **reproductible et vérifiée** en CI : récupération du source/artifact libXray v26.11.9 épinglé avec vérification de hash (ou build from source officiel), inspection des ABIs/contenu AAR, puis (si propre) intégration minimale dans `:app` et build CI démontrant l’accessibilité API sans démarrer de tunnel.
+2. Consigner les résultats (preuves, logs, artefacts) et mettre à jour `STATUS.md`/docs ; ne déclarer la Phase 2 terminée que si les critères de validation sont satisfaits.
+3. Préparer la Phase 3 uniquement après validation d’intégration moteur réelle contrôlée.
 
 ## Instructions de reprise pour une autre IA
 
-1. Cloner `https://github.com/dems469-lab/ONFAA-TUNNEL-.git` et se placer sur `main`.
-2. Lire `STATUS.md`, `docs/ROADMAP.md`, `docs/DECISIONS.md`, `docs/BUILD_GUIDE.md`, `docs/ANDROID_XRAY_SEPARATION.md`.
-3. Confirmer la validation Phase 1 via le run GitHub Actions réussi et l’artefact APK.
-4. Respecter : XTLS/Xray-core officiel upstream uniquement (intégration future via libXray vérifié), pas de sing-box, pas de faux moteur/librairie, pas de simulation de connexion/stats, pas de secrets.
-5. À chaque étape validée : mettre à jour la documentation, commiter clairement, pousser sur `main`, vérifier la présence distante et les résultats CI, puis actualiser `STATUS.md`.
+1. Lire `STATUS.md`, `docs/XRAY_UPSTREAM_AUDIT.md`, `docs/LIBXRAY_API_REFERENCE.md`, `docs/DECISIONS.md`, `docs/BUILD_GUIDE.md`.
+2. Ne pas démarrer de connexion VPN réelle en Phase 2 ; ne pas intégrer de binaire/fork non vérifié ; ne pas inventer de signatures libXray.
+3. Toute intégration doit épingler tag/commit/SHA256 et conserver la traçabilité CI. Status: `main...origin/main` will change after commit/push — toujours vérifier distant et CI.

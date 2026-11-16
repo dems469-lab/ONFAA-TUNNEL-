@@ -15,8 +15,9 @@ La roadmap est organisée en dix phases. Chaque phase doit être documentée, va
 
 ## Phase 2 — Étude et intégration Xray
 - **Objectif :** étudier XTLS/Xray-core officiel et définir l’intégration **libXray**.
-- **Livrables attendus :** analyse documentée des artefacts/API disponibles, choix d’intégration (sans inventer de signatures), premiers éléments d’intégration technique selon faisabilité, mise à jour des décisions.
-- **Contrainte :** aucun remplacement par sing-box.
+- **Livrables attendus :** analyse documentée des artefacts/API disponibles, versions/tags/commits épinglés, matrice de compatibilité, stratégie de build Android reproductible, preuve de concept si réalisable proprement, mise à jour des décisions.
+- **État :** audit documentaire réalisé (sources officielles v26.11.9 examinées) et consigné dans `docs/XRAY_UPSTREAM_AUDIT.md` / `docs/LIBXRAY_API_REFERENCE.md` ; PoC d’intégration/compilation **non engagée** à ce stade (voir audit et STATUS).
+- **Contrainte :** aucun remplacement par sing-box, aucune signature API inventée.
 
 ## Phase 3 — Connexion VPN réelle
 - **Objectif :** établir une connexion VPN réelle via `VpnService` et le moteur Xray intégré.

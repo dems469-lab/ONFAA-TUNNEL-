@@ -23,9 +23,10 @@ Ce plan définit les catégories de tests nécessaires au fil des phases. Les ou
 - **Résultats** : consignés dans `STATUS.md` et `CHANGELOG.md` après exécution réelle de la CI.
 
 ### Phase 2 — Étude et intégration Xray
-- Validation de la chaîne d’intégration `libXray` (chargement, appels minimaux) dans un environnement contrôlé.
-- Tests de non-régression sur la configuration/build après ajout des dépendances natives.
-- Documentation des prérequis runtime (ABI, versions Android) confirmés par tests.
+- **Audit (réalisé)** : vérification des tags/commits/licences/dépendances et de l’API source pour Xray-core et libXray ; documentation dans `docs/XRAY_UPSTREAM_AUDIT.md` et `docs/LIBXRAY_API_REFERENCE.md`.
+- **À réaliser pour clôturer la validation technique** : PoC CI reproductible (artefact/source épinglé + vérification SHA256 ou build officiel), inspection des ABIs/contenu de l’AAR, compilation du projet avec intégration minimale et preuve d’accessibilité de l’API (sans démarrage de tunnel).
+- Tests de non-régression build Android existant après toute intégration.
+- Documentation des prérequis runtime (ABI, versions Android/NDK/Go/gomobile) confirmés par preuves.
 
 ### Phase 3 — Connexion VPN réelle
 - **Tests fonctionnels manuels** sur appareil réel : démarrage/arrêt du tunnel, maintien de session, comportement à la perte réseau, reconnexion si implémentée.
