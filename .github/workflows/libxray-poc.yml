@@ -1,4 +1,4 @@
-name: libXray Android PoC (Phase 2B)
+name: libXray Android build and real VPN E2E (Phase 3)
 
 on:
   workflow_dispatch:
@@ -7,8 +7,18 @@ on:
     paths:
       - ".github/workflows/libxray-poc.yml"
       - "scripts/inspect_libxray_aar.sh"
+      - "scripts/e2e/**"
       - "app/src/main/java/com/onfaa/tunnel/core/xray/**"
-      - "app/src/androidTest/java/com/onfaa/tunnel/core/xray/**"
+      - "app/src/main/java/com/onfaa/tunnel/vpn/**"
+      - "app/src/main/java/com/onfaa/tunnel/data/config/**"
+      - "app/src/main/java/com/onfaa/tunnel/domain/model/**"
+      - "app/src/main/java/com/onfaa/tunnel/feature/**"
+      - "app/src/main/res/**"
+      - "app/src/main/AndroidManifest.xml"
+      - "app/src/androidTest/**"
+      - "app/src/test/**"
+      - "app/build.gradle.kts"
+      - "gradle/**"
 
 permissions:
   contents: read
@@ -27,6 +37,15 @@ env:
   # Pinned for reproducibility of gomobile tool resolution (build script resolves LIBXRAY_GOMOBILE_VERSION).
   LIBXRAY_GOMOBILE_VERSION: v0.0.0-20260217195705-b56b3793a9c4
   GO_VERSION: "1.26.1"
+  # Deterministic E2E fixture (test-only credential, never a real user secret).
+  E2E_DIR: /tmp/onfaa-e2e
+  E2E_UUID: "11111111-1111-4111-8111-111111111111"
+  E2E_TOKEN: "onfaa-e2e-token-phase3"
+  E2E_VLESS_PORT: "18443"
+  E2E_VMESS_PORT: "18444"
+  E2E_HTTP_PORT: "18080"
+  E2E_DNS_PORT: "15353"
+  E2E_ANSWER_IP: "192.0.2.10"
 
 jobs:
   build-libxray-and-integrate:
@@ -154,6 +173,83 @@ jobs:
           grep -qx "ELF_ARCH_OK" "$REPORT/elf_arch_check.txt"
           grep -qx "ALL_LOAD_ALIGNED_16K" "$REPORT/sixteen_kb.txt"
 
+      - name: Build pinned official Xray-core server for E2E
+        shell: bash
+        env:
+          GOTOOLCHAIN: auto
+        run: |
+          set -euo pipefail
+          mkdir -p "$E2E_DIR"
+          rm -rf /tmp/Xray-core
+          git clone --no-checkout https://github.com/XTLS/Xray-core.git /tmp/Xray-core
+          cd /tmp/Xray-core
+          git fetch --tags --depth=1 origin "$XRAY_CORE_TAG"
+          git checkout "$XRAY_CORE_COMMIT"
+          ACTUAL="$(git rev-parse HEAD)"
+          echo "Xray-core HEAD: $ACTUAL"
+          test "$ACTUAL" = "$XRAY_CORE_COMMIT"
+          git --no-pager show -s --format='%H %s' HEAD | tee "$GITHUB_WORKSPACE/xray-core-commit.txt"
+          go build -trimpath -o "$E2E_DIR/xray" ./main
+          "$E2E_DIR/xray" version | tee "$E2E_DIR/xray-version.txt"
+
+      - name: Start official Xray server and deterministic E2E responders
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$E2E_DIR"
+          sudo ip addr add "$E2E_ANSWER_IP/32" dev lo
+          python3 scripts/e2e/onfaa_e2e_services.py \
+            --http-bind "$E2E_ANSWER_IP" --http-port "$E2E_HTTP_PORT" \
+            --dns-bind 127.0.0.1 --dns-port "$E2E_DNS_PORT" \
+            --answer-ip "$E2E_ANSWER_IP" --token "$E2E_TOKEN" \
+            > "$E2E_DIR/services.log" 2>&1 &
+          echo $! > "$E2E_DIR/services.pid"
+          cat > "$E2E_DIR/server.json" <<EOF
+          {
+            "log": {"loglevel": "info", "access": "$E2E_DIR/access.log"},
+            "inbounds": [
+              {
+                "tag": "vless-in",
+                "listen": "127.0.0.1",
+                "port": $E2E_VLESS_PORT,
+                "protocol": "vless",
+                "settings": {
+                  "clients": [{"id": "$E2E_UUID"}],
+                  "decryption": "none"
+                }
+              },
+              {
+                "tag": "vmess-in",
+                "listen": "127.0.0.1",
+                "port": $E2E_VMESS_PORT,
+                "protocol": "vmess",
+                "settings": {
+                  "clients": [{"id": "$E2E_UUID"}]
+                }
+              }
+            ],
+            "outbounds": [{"protocol": "freedom", "tag": "direct"}]
+          }
+          EOF
+          "$E2E_DIR/xray" -test -c "$E2E_DIR/server.json"
+          "$E2E_DIR/xray" -c "$E2E_DIR/server.json" > "$E2E_DIR/xray-server.log" 2>&1 &
+          echo $! > "$E2E_DIR/xray.pid"
+          python3 - <<'PY'
+          import socket, time
+          for port in (18443, 18444):
+              for _ in range(50):
+                  try:
+                      socket.create_connection(("127.0.0.1", port), 1).close()
+                      break
+                  except OSError:
+                      time.sleep(0.2)
+              else:
+                  raise SystemExit(f"port {port} not listening")
+          PY
+          curl -fsS "http://$E2E_ANSWER_IP:$E2E_HTTP_PORT/token" | tee "$E2E_DIR/token.txt"
+          test "$(cat "$E2E_DIR/token.txt")" = "$E2E_TOKEN"
+          echo "E2E servers ready: Xray $E2E_VLESS_PORT/$E2E_VMESS_PORT, token $E2E_HTTP_PORT, DNS $E2E_DNS_PORT"
+
       - name: Publish PoC evidence to log and job summary
         shell: bash
         run: |
@@ -246,7 +342,19 @@ jobs:
           profile: pixel_6
           disable-animations: true
           emulator-boot-timeout: 900
-          script: ./gradlew :app:connectedDebugAndroidTest --stacktrace
+          script: |
+            set -euo pipefail
+            adb shell settings put global private_dns_mode off
+            adb shell appops set com.onfaa.tunnel ACTIVATE_VPN allow || true
+            ./gradlew :app:connectedDebugAndroidTest --stacktrace \
+              -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e=true \
+              -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.uuid="$E2E_UUID" \
+              -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.host="10.0.2.2" \
+              -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.vlessPort="$E2E_VLESS_PORT" \
+              -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.vmessPort="$E2E_VMESS_PORT" \
+              -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.dns="10.0.2.2:$E2E_DNS_PORT" \
+              -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.probeUrl="http://onfaa.test:$E2E_HTTP_PORT/token" \
+              -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.token="$E2E_TOKEN"
 
       - name: Publish instrumented test results to job summary
         if: always()
@@ -270,6 +378,72 @@ jobs:
           cat "$REPORT/instrumented-summary.md" | tee -a "$REPORT/summary.md"
           cat "$REPORT/instrumented-summary.md" >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Verify E2E evidence and stop local servers
+        if: always()
+        shell: bash
+        run: |
+          set -uo pipefail
+          REPORT="$GITHUB_WORKSPACE/poc-report"
+          mkdir -p "$REPORT/e2e"
+          FAIL=0
+
+          E2E_XML="$(find app/build/outputs/androidTest-results -name '*VpnTunnelE2ETest*.xml' 2>/dev/null | head -1 || true)"
+          if [ -z "$E2E_XML" ]; then
+            echo "E2E_XML_MISSING" | tee "$REPORT/e2e/result.txt"
+            FAIL=1
+          else
+            cp "$E2E_XML" "$REPORT/e2e/VpnTunnelE2ETest.xml"
+            grep -h "<testsuite " "$E2E_XML" | tee "$REPORT/e2e/testsuite.txt"
+            python3 - "$E2E_XML" <<'PY' || FAIL=1
+          import sys
+          import xml.etree.ElementTree as ET
+          root = ET.parse(sys.argv[1]).getroot()
+          suite = root if root.tag == "testsuite" else root.find("testsuite")
+          if suite is None:
+              print("E2E_NO_TESTSuite")
+              sys.exit(1)
+          tests = int(suite.get("tests", "0"))
+          failures = int(suite.get("failures", "0"))
+          errors = int(suite.get("errors", "0"))
+          skipped = int(suite.get("skipped", "0"))
+          print(f"E2E tests={tests} failures={failures} errors={errors} skipped={skipped}")
+          if tests < 3 or failures or errors or skipped:
+              sys.exit(1)
+          PY
+          fi
+
+          if [ -f "$E2E_DIR/xray.pid" ]; then kill "$(cat "$E2E_DIR/xray.pid")" 2>/dev/null || true; fi
+          if [ -f "$E2E_DIR/services.pid" ]; then kill "$(cat "$E2E_DIR/services.pid")" 2>/dev/null || true; fi
+          sleep 1
+          for f in services.log xray-server.log access.log xray-version.txt server.json token.txt; do
+            cp "$E2E_DIR/$f" "$REPORT/e2e/$f" 2>/dev/null || true
+          done
+          sudo ip addr del "$E2E_ANSWER_IP/32" dev lo 2>/dev/null || true
+
+          if [ -s "$REPORT/e2e/access.log" ] && grep -q "$E2E_ANSWER_IP:$E2E_HTTP_PORT" "$REPORT/e2e/access.log"; then
+            echo "ACCESS_LOG_PROVES_TUNNEL_DESTINATION" | tee -a "$REPORT/e2e/result.txt"
+          else
+            echo "ACCESS_LOG_MISSING_TUNNEL_DESTINATION" | tee -a "$REPORT/e2e/result.txt"
+            FAIL=1
+          fi
+
+          {
+            echo ""
+            echo "## E2E réel — Xray-core officiel local"
+            echo "- Xray-core épinglé : \`$(cat "$GITHUB_WORKSPACE/xray-core-commit.txt" 2>/dev/null || echo n/a)\`"
+            echo "- Version : \`$(cat "$REPORT/e2e/xray-version.txt" 2>/dev/null || echo n/a)\`"
+            echo '```'
+            cat "$REPORT/e2e/testsuite.txt" 2>/dev/null || echo "n/a"
+            cat "$REPORT/e2e/result.txt" 2>/dev/null || true
+            echo '```'
+            echo "### Journal d'accès du serveur Xray (extrait)"
+            echo '```'
+            tail -20 "$REPORT/e2e/access.log" 2>/dev/null || echo "n/a"
+            echo '```'
+          } > "$REPORT/e2e/summary.md"
+          cat "$REPORT/e2e/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          exit "$FAIL"
+
       - name: Collect build reports
         if: always()
         shell: bash
@@ -288,6 +462,10 @@ jobs:
             echo "LIBXRAY_ANDROID_API=$LIBXRAY_ANDROID_API"
             echo "LIBXRAY_GOMOBILE_VERSION=$LIBXRAY_GOMOBILE_VERSION"
             echo "GO_VERSION=$GO_VERSION"
+            echo "E2E_UUID=$E2E_UUID"
+            echo "E2E_VLESS_PORT=$E2E_VLESS_PORT"
+            echo "E2E_VMESS_PORT=$E2E_VMESS_PORT"
+            echo "E2E_PROBE_URL=http://onfaa.test:$E2E_HTTP_PORT/token"
           } > "$GITHUB_WORKSPACE/poc-report/build-env.txt"
 
       - name: Upload PoC report and artifacts

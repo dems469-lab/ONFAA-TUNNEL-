@@ -5,6 +5,8 @@
     <string name="nav_stats">Statistiques</string>
     <string name="nav_logs">Journaux</string>
     <string name="nav_settings">Paramètres</string>
-    <string name="connect_disabled">Connexion non opérationnelle (moteur Xray/libXray non intégré)</string>
-    <string name="home_status">État : moteur VPN non intégré — aucune connexion active</string>
+    <string name="home_status">Déconnecté — aucune connexion active</string>
+    <string name="home_no_config">Importez une configuration VLESS ou VMess dans l’onglet Configurations.</string>
+    <string name="connect">Connexion</string>
+    <string name="disconnect">Déconnexion</string>
 </resources>

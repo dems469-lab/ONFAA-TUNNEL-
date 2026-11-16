@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Debug/test builds only: the CI end-to-end fixture uses a local token HTTP
+  server. Release builds keep cleartext disabled (see src/main).
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

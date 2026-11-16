@@ -1,28 +1,304 @@
 package com.onfaa.tunnel.vpn
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Intent
 import android.net.VpnService
+import android.os.Build
+import android.os.ParcelFileDescriptor
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
+import com.onfaa.tunnel.MainActivity
+import com.onfaa.tunnel.R
+import com.onfaa.tunnel.core.xray.XrayBridge
+import com.onfaa.tunnel.core.xray.XrayConfigBuilder
+import com.onfaa.tunnel.core.xray.XrayErrorSanitizer
+import com.onfaa.tunnel.data.config.TunnelConfigRepository
+import com.onfaa.tunnel.domain.model.TunnelProfile
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 
 /**
- * Phase 1 preparation only.
+ * Real Android VPN service backed by official XTLS/Xray-core via libXray.
  *
- * This service is registered for future Android VpnService integration.
- * It does NOT establish a VPN tunnel, does NOT start Xray/libXray, and does NOT
- * produce any connection or traffic statistics.
- *
- * Real tunnel orchestration with upstream XTLS/Xray-core via libXray will be
- * implemented in later phases after official API verification.
+ * Lifecycle: VpnService.prepare (UI) -> startForegroundService -> establish TUN
+ * -> protect outbound fds -> setDNS -> runXray -> real probe -> Connected.
+ * Reverse order on stop. No state is reported as connected before the engine
+ * is running and the probe succeeded.
  */
 class OnfaaTunnelVpnService : VpnService() {
 
+    companion object {
+        const val ACTION_CONNECT = "com.onfaa.tunnel.action.CONNECT"
+        const val ACTION_DISCONNECT = "com.onfaa.tunnel.action.DISCONNECT"
+
+        const val EXTRA_SHARE_LINK = "com.onfaa.tunnel.extra.SHARE_LINK"
+        const val EXTRA_DNS_SERVER = "com.onfaa.tunnel.extra.DNS_SERVER"
+        const val EXTRA_PROBE_URL = "com.onfaa.tunnel.extra.PROBE_URL"
+
+        const val DEFAULT_DNS_SERVER = XrayConfigBuilder.DEFAULT_RESOLVER_ENDPOINT
+        const val DEFAULT_PROBE_URL = "https://www.gstatic.com/generate_204"
+
+        private const val CHANNEL_ID = "onfaa_tunnel"
+        private const val NOTIFICATION_ID = 1001
+    }
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val lifecycle = Mutex()
+
+    private var tun: ParcelFileDescriptor? = null
+    private var engineRunning = false
+
+    @Volatile
+    private var destroyed = false
+
+    override fun onCreate() {
+        super.onCreate()
+        createNotificationChannel()
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // No-op: real VPN startup will be implemented in Phase 3.
-        stopSelf()
+        when (intent?.action) {
+            ACTION_CONNECT -> {
+                showForeground("Connexion…")
+                scope.launch { connect(intent) }
+            }
+
+            ACTION_DISCONNECT -> scope.launch { disconnect("Déconnexion demandée") }
+
+            else -> {
+                TunnelStatusRepository.log("Service démarré sans action")
+                stopSelf()
+            }
+        }
         return START_NOT_STICKY
     }
 
+    private suspend fun connect(intent: Intent) = lifecycle.withLock {
+        if (engineRunning) return@withLock
+
+        TunnelStatusRepository.set(TunnelState.Connecting)
+        TunnelStatusRepository.log("Connexion demandée")
+
+        try {
+            val profile = resolveProfile(intent)
+            TunnelStatusRepository.log("Configuration ${profile.protocol.name} validée")
+
+            if (!XrayBridge.isAvailable()) {
+                throw IllegalStateException("Moteur libXray indisponible dans cette compilation")
+            }
+
+            val descriptor = buildTun() ?: throw IllegalStateException("Permission VPN refusée par Android")
+            tun = descriptor
+
+            val dnsEndpoint = intent.getStringExtra(EXTRA_DNS_SERVER) ?: DEFAULT_DNS_SERVER
+            val protector: (Int) -> Boolean = { fd ->
+                try {
+                    protect(fd)
+                } catch (_: Throwable) {
+                    false
+                }
+            }
+            if (!XrayBridge.registerSocketProtector(protector)) {
+                throw IllegalStateException("Impossible d'enregistrer la protection des sockets VPN")
+            }
+            XrayBridge.setDNS(protector, dnsEndpoint)
+
+            val config = XrayConfigBuilder.build(
+                profile = profile,
+                tunFd = descriptor.fd,
+                dnsEndpoints = listOf(dnsEndpoint)
+            )
+
+            val validation = XrayBridge.testXray(config)
+            if (!validation.success) {
+                throw IllegalStateException(
+                    "Configuration refusée par Xray : ${XrayErrorSanitizer.sanitize(validation.error)}"
+                )
+            }
+
+            val started = XrayBridge.runXray(config)
+            if (!started.success) {
+                throw IllegalStateException(
+                    "Démarrage Xray refusé : ${XrayErrorSanitizer.sanitize(started.error)}"
+                )
+            }
+            if (!XrayBridge.getXrayState()) {
+                throw IllegalStateException("Le moteur Xray n'est pas actif après démarrage")
+            }
+            engineRunning = true
+            TunnelStatusRepository.log("Moteur Xray démarré (libXray ${XrayBridge.API_VERSION})")
+
+            TunnelStatusRepository.set(TunnelState.Verifying)
+            updateNotification("Vérification de la connectivité…")
+            val probeUrl = intent.getStringExtra(EXTRA_PROBE_URL) ?: DEFAULT_PROBE_URL
+            val probe = ConnectivityProbe.check(probeUrl)
+            if (!probe.ok) {
+                throw IllegalStateException("Tunnel démarré mais connectivité non vérifiée : ${probe.detail}")
+            }
+            TunnelStatusRepository.log("Connectivité réelle vérifiée (${probe.detail})")
+
+            if (destroyed) {
+                teardownEngine()
+                return@withLock
+            }
+            TunnelStatusRepository.set(
+                TunnelState.Connected(
+                    profileName = profile.displayName,
+                    protocol = profile.protocol,
+                    sinceEpochMs = System.currentTimeMillis()
+                )
+            )
+            updateNotification("Connecté — ${profile.displayName}")
+        } catch (c: kotlinx.coroutines.CancellationException) {
+            teardownEngine()
+            throw c
+        } catch (t: Throwable) {
+            val message = XrayErrorSanitizer.sanitize(t.message ?: t.javaClass.simpleName)
+            teardownEngine()
+            if (!destroyed) {
+                TunnelStatusRepository.error(message)
+                stopForegroundCompat()
+                stopSelf()
+            }
+        }
+    }
+
+    private suspend fun disconnect(reason: String) = lifecycle.withLock {
+        if (TunnelStatusRepository.state.value is TunnelState.Idle && tun == null && !engineRunning) {
+            stopSelf()
+            return@withLock
+        }
+        TunnelStatusRepository.set(TunnelState.Disconnecting)
+        TunnelStatusRepository.log(reason)
+        teardownEngine()
+        TunnelStatusRepository.set(TunnelState.Idle)
+        stopForegroundCompat()
+        stopSelf()
+    }
+
+    private suspend fun resolveProfile(intent: Intent): TunnelProfile {
+        val link = intent.getStringExtra(EXTRA_SHARE_LINK)
+        if (!link.isNullOrBlank()) {
+            return TunnelConfigRepository.import(link).getOrElse { failure ->
+                throw IllegalStateException(failure.message ?: "Configuration invalide")
+            }
+        }
+        return TunnelConfigRepository.selectedProfile()
+            ?: throw IllegalStateException("Aucune configuration sélectionnée")
+    }
+
+    private fun buildTun(): ParcelFileDescriptor? {
+        val builder = Builder()
+            .setSession("ONFAA TUNNEL")
+            .setMtu(XrayConfigBuilder.DEFAULT_MTU)
+            .addAddress("10.10.0.2", 24)
+            .addDnsServer("10.10.0.1")
+            .addRoute("0.0.0.0", 0)
+            .addAddress("fd00::2", 64)
+            .addDnsServer("fd00::1")
+            .addRoute("::", 0)
+        return try {
+            builder.establish()
+        } catch (failure: Throwable) {
+            throw IllegalStateException("Permission VPN refusée par Android", failure)
+        }
+    }
+
+    private suspend fun teardownEngine() = withContext(NonCancellable) {
+        runCatching { XrayBridge.stopXray() }
+            .onFailure { TunnelStatusRepository.log("Arrêt Xray : ${XrayErrorSanitizer.sanitize(it.message)}") }
+        runCatching { XrayBridge.resetDNS() }
+            .onFailure { TunnelStatusRepository.log("Reset DNS : ${XrayErrorSanitizer.sanitize(it.message)}") }
+        XrayBridge.clearSocketProtector()
+        engineRunning = false
+        tun?.let { descriptor ->
+            runCatching { descriptor.close() }
+        }
+        tun = null
+    }
+
+    override fun onRevoke() {
+        scope.launch { disconnect("VPN révoqué par Android") }
+        super.onRevoke()
+    }
+
     override fun onDestroy() {
-        // No tunnel to tear down in Phase 1.
+        destroyed = true
+        scope.cancel()
+        runBlocking(Dispatchers.IO) { teardownEngine() }
+        if (TunnelStatusRepository.state.value !is TunnelState.Error) {
+            TunnelStatusRepository.set(TunnelState.Idle)
+        }
+        stopForegroundCompat()
         super.onDestroy()
+    }
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT < 26) return
+        val manager = getSystemService(NotificationManager::class.java) ?: return
+        val channel = NotificationChannel(
+            CHANNEL_ID,
+            "Tunnel ONFAA",
+            NotificationManager.IMPORTANCE_LOW
+        ).apply {
+            description = "État du tunnel Xray"
+            setShowBadge(false)
+        }
+        manager.createNotificationChannel(channel)
+    }
+
+    private fun showForeground(text: String) {
+        startForeground(NOTIFICATION_ID, buildNotification(text))
+    }
+
+    private fun updateNotification(text: String) {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            return
+        }
+        runCatching {
+            NotificationManagerCompat.from(this).notify(NOTIFICATION_ID, buildNotification(text))
+        }
+    }
+
+    private fun buildNotification(text: String): android.app.Notification {
+        val openApp = PendingIntent.getActivity(
+            this,
+            0,
+            Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val disconnect = PendingIntent.getService(
+            this,
+            1,
+            Intent(this, OnfaaTunnelVpnService::class.java).setAction(ACTION_DISCONNECT),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentTitle("ONFAA TUNNEL")
+            .setContentText(text)
+            .setContentIntent(openApp)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .addAction(0, "Déconnecter", disconnect)
+            .build()
+    }
+
+    private fun stopForegroundCompat() {
+        stopForeground(STOP_FOREGROUND_REMOVE)
     }
 }
