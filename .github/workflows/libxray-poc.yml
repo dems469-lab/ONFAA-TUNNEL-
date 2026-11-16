@@ -9,7 +9,6 @@ on:
       - "scripts/inspect_libxray_aar.sh"
       - "app/src/main/java/com/onfaa/tunnel/core/xray/**"
       - "app/src/androidTest/java/com/onfaa/tunnel/core/xray/**"
-      - "docs/LIBXRAY_ANDROID_POC.md"
 
 permissions:
   contents: read
@@ -147,8 +146,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -s "$GITHUB_WORKSPACE/poc-report/abis.txt" && echo "ABIs detected" || (echo "No ABIs detected" && exit 1)
-          grep -qi "invoke" "$GITHUB_WORKSPACE/poc-report/javap.txt"
+          REPORT="$GITHUB_WORKSPACE/poc-report"
+          test -s "$REPORT/abis.txt" && echo "ABIs detected" || (echo "No ABIs detected" && exit 1)
+          grep -qi "invoke" "$REPORT/javap.txt"
+          test -s "$REPORT/invoke_signature.txt"
+          grep -q "java.lang.String invoke(java.lang.String)" "$REPORT/invoke_signature.txt"
+          grep -qx "ELF_ARCH_OK" "$REPORT/elf_arch_check.txt"
+          grep -qx "ALL_LOAD_ALIGNED_16K" "$REPORT/sixteen_kb.txt"
 
       - name: Publish PoC evidence to log and job summary
         shell: bash
@@ -166,7 +170,7 @@ jobs:
             echo "### SHA-256 AAR"
             echo '```'
             cat "$REPORT/aar.sha256"
-            cat "$REPORT/aar.size.txt" 2>/dev/null || true
+            if [[ -f "$REPORT/aar.size.txt" ]]; then cat "$REPORT/aar.size.txt"; fi
             echo '```'
             echo "### ABIs présentes"
             echo '```'
@@ -176,9 +180,29 @@ jobs:
             echo '```'
             cat "$REPORT/jni.files.txt"
             echo '```'
+            echo "### Architectures ELF par ABI"
+            echo '```'
+            cat "$REPORT/elf_arch_full.txt" 2>/dev/null || echo "n/a"
+            echo '```'
+            echo "### Alignement 16 KiB (segments LOAD)"
+            echo '```'
+            cat "$REPORT/sixteen_kb.txt" 2>/dev/null || echo "n/a"
+            echo '```'
+            echo "### Dépendances natives (NEEDED)"
+            echo '```'
+            cat "$REPORT/needed_libs.txt" 2>/dev/null || echo "n/a"
+            echo '```'
             echo "### Signatures JVM contenant invoke"
             echo '```'
             cat "$REPORT/invoke_matches.txt" 2>/dev/null || echo "n/a"
+            echo '```'
+            echo "### Signature JVM exacte de l'entrée libXray"
+            echo '```'
+            cat "$REPORT/libXray_class.txt" 2>/dev/null || echo "n/a"
+            echo '```'
+            echo "### go.Seq (chargement runtime Go)"
+            echo '```'
+            cat "$REPORT/go_Seq.txt" 2>/dev/null || echo "n/a"
             echo '```'
             echo "### Classes JVM générées (extrait)"
             echo '```'
@@ -203,6 +227,49 @@ jobs:
         shell: bash
         run: ./gradlew :app:assembleDebugAndroidTest --stacktrace
 
+      - name: Enable KVM for the Android emulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          ls -l /dev/kvm
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Run real-artifact instrumented tests on emulator (x86_64, API 35)
+        uses: ReactiveCircus/android-emulator-runner@v2.38.0
+        with:
+          api-level: 35
+          target: default
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          emulator-boot-timeout: 900
+          script: ./gradlew :app:connectedDebugAndroidTest --stacktrace
+
+      - name: Publish instrumented test results to job summary
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          REPORT="$GITHUB_WORKSPACE/poc-report"
+          mkdir -p "$REPORT"
+          {
+            echo ""
+            echo "## Tests instrumentés réels (émulateur x86_64 API 35)"
+            echo '```'
+            FOUND=0
+            while IFS= read -r f; do
+              FOUND=1
+              grep -h "<testsuite " "$f"
+            done < <(find app/build/outputs/androidTest-results -name '*.xml' 2>/dev/null | sort)
+            if [ "$FOUND" -eq 0 ]; then echo "NO_INSTRUMENTED_RESULTS"; fi
+            echo '```'
+          } > "$REPORT/instrumented-summary.md"
+          cat "$REPORT/instrumented-summary.md" | tee -a "$REPORT/summary.md"
+          cat "$REPORT/instrumented-summary.md" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Collect build reports
         if: always()
         shell: bash
@@ -211,6 +278,7 @@ jobs:
           mkdir -p "$GITHUB_WORKSPACE/poc-report/gradle"
           cp -r app/build/reports "$GITHUB_WORKSPACE/poc-report/gradle/reports" 2>/dev/null || true
           cp -r app/build/test-results "$GITHUB_WORKSPACE/poc-report/gradle/test-results" 2>/dev/null || true
+          cp -r app/build/outputs/androidTest-results "$GITHUB_WORKSPACE/poc-report/gradle/androidTest-results" 2>/dev/null || true
           {
             echo "LIBXRAY_TAG=$LIBXRAY_TAG"
             echo "LIBXRAY_COMMIT=$LIBXRAY_COMMIT"
