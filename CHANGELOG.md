@@ -10,7 +10,7 @@ Le format s’inspire de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/
 - Phase 1 : fondations Android (structure Gradle/module, configuration de base, préparation `VpnService`).
 - Phases suivantes : voir [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
-## [0.0.0-phase0] — En préparation (non publié au moment de la rédaction)
+## [0.0.0-phase0] — 2026-11-16 (publié)
 
 ### Ajouté
 - Structure initiale du projet (répertoires `docs/`, `app/`, `gradle/`, `.github/`).
@@ -19,5 +19,6 @@ Le format s’inspire de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/
 - Préparation documentaire CI/CD (`.github/workflows/README.md`) sans workflow de compilation Android.
 
 ### Notes
-- Cette entrée doit être ajustée avec la date et le hash du commit après publication vérifiée sur `main`.
-- Référence du commit initial distant préexistant : `3be425c` (*Initial commit*, README minimal).
+- Commit de Phase 0 publié et vérifié sur `main` : `96cab902f0f96ed5a60dc40e03016b00500fd32e`.
+- Référence du commit initial distant préexistant : `3be425c984deae6c2c0d5bc8777c870c1afbed07` (*Initial commit*, README minimal).
+- Une mise à jour documentaire de statut peut suivre dans un commit distinct pour refléter la validation finale.

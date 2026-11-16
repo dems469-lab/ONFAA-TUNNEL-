@@ -3,23 +3,25 @@
 ## État de phase
 
 - **Phase actuelle :** 0 — Initialisation GitHub
-- **État :** en cours (préparation locale de la structure et de la documentation ; publication distante à vérifier après push)
+- **État :** terminée (structure et documentation publiées et vérifiées sur GitHub)
 
 ## Références dépôt
 
 - **Dépôt :** https://github.com/dems469-lab/ONFAA-TUNNEL-
 - **Branche principale :** `main`
-- **Dernier commit publié (distant, vérifié avant cette mission) :** `3be425c984deae6c2c0d5bc8777c870c1afbed07` — *Initial commit* (README minimal)
+- **Dernier commit publié (distant, vérifié) :** `96cab902f0f96ed5a60dc40e03016b00500fd32e` — *Phase 0: initialize project structure and documentation*
+- **Commit initial préexistant (distant) :** `3be425c984deae6c2c0d5bc8777c870c1afbed07` — *Initial commit* (README minimal)
 
-> Ce champ doit être mis à jour avec le hash du commit de Phase 0 **après** un push réussi et une vérification réelle sur GitHub.
+> Mise à jour documentaire finale de statut effectuée localement après vérification distante ; elle doit être commitée et poussée pour que le dépôt reflète cet état.
 
-## Travaux terminés (locaux, en préparation de publication)
+## Travaux terminés
 
 - Inspection du dépôt distant (accès lecture confirmé, branche `main` présente).
 - Alignement de l’espace de travail local sur `origin/main`.
 - Création de la structure de répertoires et fichiers de Phase 0.
 - Rédaction des documents fondamentaux (`README`, contexte, architecture cible, roadmap, décisions, plan de tests, guide de build, sécurité, spécification design).
 - Préparation documentaire des bases CI/CD (`.github/workflows/README.md`) sans workflow de compilation Android.
+- Commit, push sur `origin/main` et vérification distante de la présence des fichiers (arborescence complète de Phase 0 visible sur le dépôt).
 
 ## Travaux non commencés
 
@@ -29,21 +31,17 @@
 
 ## Blocages
 
-- **Publication GitHub non encore exécutée/vérifiée dans cette session au moment de la rédaction initiale de ce fichier.** L’authentification push et la visibilité distante des fichiers doivent être confirmées lors de l’étape de publication. Si le push échoue (droits, authentification), la mission doit s’arrêter et demander une configuration sécurisée (sans exposer de token).
+- Aucun blocage technique identifié pour la Phase 0. L’accès en lecture et en écriture au dépôt distant a été vérifié par un push réussi.
 
 ## Prochaine tâche
 
-1. Vérifier `git status` et le diff.
-2. Créer un commit explicite de la Phase 0.
-3. Publier sur `origin/main`.
-4. Vérifier la présence réelle des fichiers sur GitHub (ex. `git ls-remote`, consultation des chemins/arborescence).
-5. Mettre à jour `STATUS.md` avec le hash du commit publié et le résultat de vérification.
+- **Phase 1 — Fondations Android :** définir la structure Gradle/module, la configuration minimale du projet Kotlin, le manifeste et la préparation de `VpnService` (sans moteur réel), en maintenant la documentation et les règles de publication GitHub.
 
 ## Instructions de reprise pour une autre IA
 
 1. Cloner le dépôt : `https://github.com/dems469-lab/ONFAA-TUNNEL-.git` et se placer sur `main`.
 2. Lire `STATUS.md`, `docs/ROADMAP.md`, `docs/DECISIONS.md` et `docs/PROJECT_CONTEXT.md`.
-3. Ne pas commencer le moteur VPN tant que la Phase 0 n’est pas validée (commit publié et vérifié sur GitHub).
+3. Confirmer que la Phase 0 est publiée (dernier commit de Phase 0 présent sur `origin/main`) avant d’entamer la Phase 1.
 4. Respecter les règles : pas de simulation de connexion, pas de sing-box, pas de secrets/UUID/tokens dans le dépôt.
 5. À chaque phase validée : mettre à jour la documentation, commiter clairement, pousser sur `main`, vérifier la présence distante, puis actualiser `STATUS.md`.
 6. Toute incertitude sur l’API `libXray` doit être consignée dans `docs/DECISIONS.md` et résolue en Phase 2 par étude des sources officielles, sans inventer de signatures.
