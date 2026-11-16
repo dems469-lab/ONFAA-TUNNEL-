@@ -22,17 +22,30 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Accept Android SDK licenses
-        run: yes | sdkmanager --licenses
-
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
       - name: Validate Gradle Wrapper
         uses: gradle/actions/wrapper-validation@v4
+
+      - name: Accept Android SDK licenses and install required components
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDKMANAGER=""
+          if command -v sdkmanager >/dev/null 2>&1; then
+            SDKMANAGER="$(command -v sdkmanager)"
+          elif [ -n "${ANDROID_HOME:-}" ] && [ -d "$ANDROID_HOME/cmdline-tools" ]; then
+            SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -path '*bin/sdkmanager' | head -n 1 || true)"
+          elif [ -n "${ANDROID_SDK_ROOT:-}" ] && [ -d "$ANDROID_SDK_ROOT/cmdline-tools" ]; then
+            SDKMANAGER="$(find "$ANDROID_SDK_ROOT/cmdline-tools" -path '*bin/sdkmanager' | head -n 1 || true)"
+          fi
+          if [ -n "$SDKMANAGER" ]; then
+            yes | "$SDKMANAGER" --licenses
+            yes | "$SDKMANAGER" "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+          else
+            echo "sdkmanager not found; proceeding with preinstalled Android SDK on runner."
+          fi
 
       - name: Run unit tests
         run: ./gradlew :app:testDebugUnitTest --stacktrace
