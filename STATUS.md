@@ -3,7 +3,7 @@
 ## État de phase
 
 - **Phase actuelle :** 2 — Audit technique et préparation de l'intégration upstream Xray-core
-- **État :** **partiellement réalisée (audit documentaire et préparation consignés ; preuve de concept d’intégration/compilation non engagée)** — la Phase 2 ne peut pas être déclarée entièrement terminée car la PoC (artefact libXray vérifié, inspection ABI, accessibilité API depuis le projet Android, compilation avec intégration) n’a pas été exécutée dans le dépôt/CI.
+- **État :** **substantiellement validée par PoC CI (build/intégration/compilation prouvés), avec une limite résiduelle** — artefact libXray officiel construit depuis sources épinglées, inspecté et intégré, compilation/tests possibles réussis en CI avec APK produit ; **tests instrumentés réels non exécutés sur appareil/émulateur** (compilés uniquement). La Phase 2 peut être considérée comme **clôturée sur le plan de l’intégration technique démontrée en CI**, sous réserve de cette limitation explicitement documentée.
 
 ## Références dépôt
 
@@ -43,16 +43,16 @@
 - Risque d’intégration multi-runtime Go si d’autres bibliothèques Go étaient ajoutées (voir README libXray).
 - Détails ABI/alignement 16 Ko à confirmer sur binaires réels.
 
-## Phase 2B — PoC d’intégration (préparée, validation CI en attente)
+## Phase 2B — PoC d’intégration (validée en CI)
 
-- **Ajouts (dépôt)** : workflow `.github/workflows/libxray-poc.yml` (build officiel libXray depuis commit épinglé, inspection AAR/ABIs/ELF/classes JVM, intégration `app/libs`, build/tests/artefacts), script `scripts/inspect_libxray_aar.sh`, bridge `com.onfaa.tunnel.core.xray.XrayBridge`, tests instrumentés réels `XrayBridgeInstrumentedTest`, documentation `docs/LIBXRAY_ANDROID_POC.md`.
-- **État** : exécution réelle du workflow, SHA-256 de l’AAR, ABIs confirmées, signatures JVM extraites, et résultats de compilation/tests **non encore validés** dans ce rapport tant que le run GitHub Actions n’est pas observé avec succès.
+- **Commit PoC publié** : `f567fd773746803abb691d14492bbe257bc09814` — *Phase 2B: fix PoC workflow Android SDK setup on CI runner*
+- **Run CI réussi** : [libXray Android PoC (Phase 2B) #43959959254](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/43959959254) (`completed/success`)
+- **Preuves CI** : checkout+vérification commit libXray `5a0f7d8d…`, build `python3 build/main.py android` (NDK r30, Go/gomobile épinglés dans workflow), génération+inspection AAR (SHA-256, ABIs, ELF/LOAD, `javap`/`invoke`), intégration dans `:app`, `:app:testDebugUnitTest`, `:app:assembleDebug`, `:app:assembleDebugAndroidTest`, artefact `libxray-poc-report`.
+- **Limite non levée** : tests instrumentés réels (chargement natif, `xrayVersion` runtime, etc.) **non exécutés** sur appareil/émulateur (APK de test compilé uniquement).
 
 ## Prochaine tâche
 
-1. Vérifier le résultat du workflow `libXray Android PoC (Phase 2B)` (URL run, commit, SHA-256 AAR, ABIs, signatures JVM, tests/build, APK).
-2. Mettre à jour `docs/LIBXRAY_ANDROID_POC.md`, `STATUS.md`, `CHANGELOG.md` avec les preuves réelles ; exécuter/attester les tests instrumentés sur appareil/émulateur si possible (sinon documenter comme non exécutés).
-3. Déclarer la Phase 2 terminée **uniquement** si l’intégration réelle est démontrée par preuves vérifiables ; sinon lister précisément les points non validés.
+- **Phase 3 — Connexion VPN réelle** (préparation contrôlée) : concevoir l’orchestration `VpnService` + moteur libXray/Xray-core réel, gestion permissions/cycle de vie/états/erreurs, en s’appuyant sur l’API et les contrôles Android vérifiés (sans simulation). Préalable recommandé : exécuter les tests instrumentés sur appareil/émulateur et consigner les résultats (SHA-256/ABIs/signatures exactes depuis l’artefact CI).
 
 ## Instructions de reprise pour une autre IA
 

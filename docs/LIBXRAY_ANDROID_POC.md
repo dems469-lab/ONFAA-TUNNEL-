@@ -1,6 +1,6 @@
 # Preuve de concept Android — intégration libXray officielle (Phase 2B)
 
-> **Statut** : PoC préparée dans le dépôt (workflow, bridge, tests instrumentés, script d’inspection). Les résultats réels (SHA-256 AAR, ABIs inspectées, signatures JVM, succès CI, APK) doivent être renseignés à partir d’une exécution réussie du workflow `libXray Android PoC (Phase 2B)` sur GitHub Actions. Aucune connexion VPN réelle n’est démarrée et aucune statistique fictive n’est affichée.
+> **Statut** : **PoC exécutée avec succès en CI** (build officiel, inspection, intégration, compilation/tests possibles). Les preuves détaillées (SHA-256 de l’AAR, liste des ABIs, signatures JVM, segments ELF/LOAD) sont générées dans l’artefact `libxray-poc-report` du run CI (téléchargement via interface GitHub). Aucune connexion VPN réelle n’est démarrée et aucune statistique fictive n’est affichée. Les tests instrumentés réels sont **compilés** mais **non exécutés** sur appareil/émulateur dans ce workflow.
 
 ## 1. Versions upstream épinglées (inchangées)
 
@@ -58,21 +58,24 @@ Workflow : `.github/workflows/libxray-poc.yml`
 - Informations ELF / segments LOAD (`readelf`) pour analyse d’alignement (16 Ko à vérifier sur les `LOAD`).
 - Extraction de `classes.jar`, `javap -public` et correspondances `invoke`.
 
-## 6. Résultats d’exécution CI (à renseigner après run réussi)
+## 6. Résultats d’exécution CI (réels, vérifiés)
 
 | Élément | Résultat |
 |---|---|
-| Workflow / run URL | _à compléter_ |
-| Commit ONFAA | _à compléter_ |
-| Commit libXray vérifié | `5a0f7d8d1c28b34afb5727b04b26a10f6dbac7e3` (attendu) |
-| SHA-256 `libXray.aar` | _à compléter (depuis rapport CI)_ |
-| ABIs détectées | _à compléter (depuis `abis.txt`)_ |
-| Signatures JVM `Invoke` (extrait) | _à compléter (depuis `javap.txt` / `invoke_matches.txt`)_ |
-| `testDebugUnitTest` | _à compléter_ |
-| `assembleDebug` | _à compléter_ |
-| `assembleDebugAndroidTest` | _à compléter_ |
-| APK debug publié | _à compléter_ |
-| Tests instrumentés exécutés sur appareil/émulateur | **Non exécutés dans ce workflow** (compilés uniquement) |
+| Workflow / run URL | [libXray Android PoC (Phase 2B) #43959959254](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/43959959254) — `completed / success` |
+| Commit ONFAA (validé par ce run) | `f567fd773746803abb691d14492bbe257bc09814` — *Phase 2B: fix PoC workflow Android SDK setup on CI runner* |
+| Commit libXray vérifié (checkout CI) | `5a0f7d8d1c28b34afb5727b04b26a10f6dbac7e3` (étape “Clone and verify libXray pinned commit” réussie) |
+| SHA-256 `libXray.aar` | Calculé et enregistré dans `poc-report/aar.sha256` (artefact CI `libxray-poc-report`) |
+| ABIs détectées | Extraites dans `poc-report/abis.txt` ; étape “Verify AAR contains native libs and Invoke binding” réussie (ABIs présentes) |
+| Inspection ELF / alignement 16 Ko | Générée dans `poc-report/elf.txt` et `poc-report/load_segments.txt` (interprétation détaillée via artefact) |
+| Signatures JVM `Invoke` | `classes.jar` inspecté (`javap -public`), correspondances dans `poc-report/invoke_matches.txt` ; étape de vérification `invoke` réussie |
+| `:app:testDebugUnitTest` | **Succès** |
+| `:app:assembleDebug` (avec `app/libs/libXray.aar` intégré) | **Succès** |
+| `:app:assembleDebugAndroidTest` (tests réels compilés) | **Succès** |
+| APK debug / artefacts publiés | Inclus dans l’artefact CI [`libxray-poc-report` (14273602500)](https://api.github.com/repos/dems469-lab/ONFAA-TUNNEL-/actions/artifacts/14273602500/zip) (téléchargement via interface GitHub) |
+| Tests instrumentés exécutés sur appareil/émulateur | **Non exécutés** (pas d’émulateur/appareil provisionné dans le workflow) ; code de test présent et compilé |
+
+**Preuves clés apportées par la CI** : build officiel `python3 build/main.py android` depuis sources épinglées, vérification du commit libXray, production de l’AAR, inspection automatisée, intégration dans `:app`, compilation Android réussie avec dépendance réelle, et exécution des tests unitaires JVM du module. **Limite restante** : exécution runtime des tests instrumentés contre le binaire natif sur appareil/émulateur non réalisée.
 
 ## 7. Limitations et points à valider
 

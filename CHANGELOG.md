@@ -9,8 +9,9 @@ Le format s’inspire de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/
 ### Phase 2 (audit réalisé ; Phase 2B PoC préparée, validation en attente)
 - Audit des sources officielles XTLS/Xray-core v26.11.9 (commit `676eaf66…`, MPL-2.0) et XTLS/libXray v26.11.9 (commit `5a0f7d8…`, MIT), alignement de dépendance vérifié.
 - Ajout de `docs/XRAY_UPSTREAM_AUDIT.md` et `docs/LIBXRAY_API_REFERENCE.md`.
-- **Phase 2B (préparation)** : workflow `libxray-poc.yml` (build officiel depuis source épinglée, vérification commit, inspection AAR/ABIs/ELF/JVM, intégration `:app`, tests/build), `XrayBridge` (Invoke apiVersion 3, appels hors UI), tests instrumentés réels, script `scripts/inspect_libxray_aar.sh`, doc `docs/LIBXRAY_ANDROID_POC.md`.
-- **En attente de preuve réelle** : résultats CI (SHA-256 AAR, ABIs, signatures JVM, compilation/tests, APK) et exécution instrumentée sur appareil/émulateur.
+- **Phase 2B (PoC validée en CI)** : workflow `libxray-poc.yml` (build officiel libXray v26.11.9 depuis commit épinglé, vérification commit, inspection AAR/ABIs/ELF/JVM, intégration `:app`, tests/build, artefacts), `XrayBridge` (Invoke apiVersion 3, appels hors UI), tests instrumentés réels, script `scripts/inspect_libxray_aar.sh`, doc `docs/LIBXRAY_ANDROID_POC.md`.
+- **Preuves CI** : run [#43959959254](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/43959959254) `success` (commit `f567fd7`), AAR construit/inspecté/intégré, `testDebugUnitTest`/`assembleDebug`/`assembleDebugAndroidTest` réussis, artefact `libxray-poc-report`.
+- **Limite** : tests instrumentés runtime non exécutés sur appareil/émulateur (compilés uniquement).
 
 ### À venir
 - PoC reproductible et vérifiée (artefact/source libXray épinglé, inspection ABIs, intégration minimale compilable si applicable).
