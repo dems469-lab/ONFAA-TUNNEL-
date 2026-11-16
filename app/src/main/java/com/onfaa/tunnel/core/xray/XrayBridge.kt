@@ -74,6 +74,18 @@ object XrayBridge {
         false
     }
 
+    /**
+     * Forces initialization of the gomobile-generated class, whose static
+     * initializer loads the native Go runtime (libgojni.so).
+     * Throws UnsatisfiedLinkError/ExceptionInInitializerError if loading fails.
+     */
+    fun loadNativeLibrary(): Boolean {
+        val (_, method) = resolveInvoke()
+        val cls = method.declaringClass
+        Class.forName(cls.name, true, cls.classLoader)
+        return true
+    }
+
     fun invokeRaw(requestJson: String): String {
         val bytes = requestJson.toByteArray(Charsets.UTF_8)
         require(bytes.size <= MAX_REQUEST_BYTES) { "Request exceeds 16 MiB limit" }

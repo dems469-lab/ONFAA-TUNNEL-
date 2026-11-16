@@ -26,9 +26,12 @@ class XrayBridgeInstrumentedTest {
 
     @Test
     fun nativeLibraryAndInvokeApiAvailable() {
-        val sig = requireLib()
+        requireLib()
+        // Forces class initialization: gomobile's static initializer loads libgojni.so.
+        assertTrue("native Go runtime must load", XrayBridge.loadNativeLibrary())
+        val sig = XrayBridge.resolvedSignature()
         assertNotNull(sig)
-        assertTrue(sig.contains("Invoke", ignoreCase = true) || sig.contains("invoke"))
+        assertTrue(sig!!.contains("invoke", ignoreCase = true))
     }
 
     @Test
