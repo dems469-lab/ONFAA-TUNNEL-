@@ -34,12 +34,27 @@ jobs:
       - name: Assemble debug APK
         run: ./gradlew :app:assembleDebug --stacktrace
 
+      # This workflow does not build libXray: the AAR is gitignored and produced
+      # by the E2E workflow only. The APK here is therefore engine-less and can
+      # never open a tunnel. It is published under an explicit name so nobody
+      # mistakes it for an installable build.
+      - name: Label the engine-less APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="$(ls app/build/outputs/apk/debug/*.apk | head -n 1)"
+          if unzip -Z1 "$APK" | grep -q 'lib/.*/libgojni\.so'; then
+            echo "::error::Unexpected libgojni.so in a build without the pinned AAR"
+            exit 1
+          fi
+          echo "::warning::This APK has no Xray engine and cannot open a VPN. Install the 'onfaa-tunnel-apk' artifact from the 'libXray Android build and real VPN E2E' workflow instead."
+
       - name: Compile instrumented test APK (no AAR required, reflection bridge)
         run: ./gradlew :app:assembleDebugAndroidTest --stacktrace
 
-      - name: Upload debug APK artifact
+      - name: Upload engine-less debug APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: onfaa-tunnel-debug-apk
+          name: onfaa-tunnel-debug-apk-no-engine
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error

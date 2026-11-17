@@ -15,11 +15,13 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -27,6 +29,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.onfaa.tunnel.core.xray.XrayBridge
 import com.onfaa.tunnel.data.config.TunnelConfigRepository
 import com.onfaa.tunnel.domain.model.TunnelProfile
 import com.onfaa.tunnel.vpn.OnfaaTunnelVpnService
@@ -40,6 +43,10 @@ fun HomeScreen() {
     val profiles by TunnelConfigRepository.profiles.collectAsStateWithLifecycle()
     val selectedId by TunnelConfigRepository.selectedId.collectAsStateWithLifecycle()
     val selected = profiles.firstOrNull { it.id == selectedId }
+    // A build without the pinned libXray AAR can never open a tunnel. Detecting
+    // it here explains the failure instead of letting each connect attempt end
+    // with a generic engine error.
+    val engineAvailable = remember { XrayBridge.isAvailable() }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -52,6 +59,10 @@ fun HomeScreen() {
     }
 
     fun requestConnect() {
+        if (!engineAvailable) {
+            TunnelStatusRepository.error(ENGINE_MISSING_MESSAGE)
+            return
+        }
         val profile = selected
         if (profile == null) {
             TunnelStatusRepository.error("Aucune configuration sélectionnée")
@@ -103,6 +114,33 @@ fun HomeScreen() {
             }
         }
         Spacer(modifier = Modifier.height(24.dp))
+        if (!engineAvailable) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer
+                )
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "Moteur Xray absent de cette compilation",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = ENGINE_MISSING_MESSAGE,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+        }
         when (state) {
             is TunnelState.Connected, is TunnelState.Reconnecting, is TunnelState.Disconnecting -> {
                 OutlinedButton(
@@ -117,7 +155,8 @@ fun HomeScreen() {
             else -> {
                 Button(
                     onClick = { requestConnect() },
-                    enabled = selected != null &&
+                    enabled = engineAvailable &&
+                        selected != null &&
                         !selected.incomplete &&
                         state !is TunnelState.AwaitingPermission &&
                         state !is TunnelState.Preparing &&
@@ -147,6 +186,12 @@ fun HomeScreen() {
         }
     }
 }
+
+private const val ENGINE_MISSING_MESSAGE =
+    "Cet APK ne contient pas le moteur libXray : aucune connexion n'est possible. " +
+        "Installez l'artefact « onfaa-tunnel-apk » du workflow « libXray Android build " +
+        "and real VPN E2E », pas l'artefact « onfaa-tunnel-debug-apk-no-engine » " +
+        "du workflow Android CI."
 
 private fun startTunnel(context: Context) {
     val intent = Intent(context, OnfaaTunnelVpnService::class.java)

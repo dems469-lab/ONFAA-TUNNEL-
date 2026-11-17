@@ -57,7 +57,12 @@ Versions épinglées et choix documentés dans [`docs/DECISIONS.md`](docs/DECISI
 
 ## Compilation (GitHub Actions uniquement)
 
-La validation et la compilation sont réalisées sur **GitHub Actions** via `.github/workflows/android.yml` (JDK/SDK, licences, validation wrapper, tests unitaires, `assembleDebug`, publication de l’APK debug en artefact). Voir [`docs/BUILD_GUIDE.md`](docs/BUILD_GUIDE.md).
+La validation et la compilation sont réalisées sur **GitHub Actions**. Deux workflows existent :
+
+- `.github/workflows/android.yml` : tests unitaires, `assembleDebug`, compilation des tests instrumentés. Rapide, mais **sans moteur Xray** (l'AAR libXray est gitignoré) : son artefact `onfaa-tunnel-debug-apk-no-engine` ne peut pas ouvrir de tunnel.
+- `.github/workflows/libxray-poc.yml` : construit l'AAR libXray épinglé, lance le tunnel réel sur émulateur et publie l'APK installable **`onfaa-tunnel-apk`**.
+
+**Pour installer l'application, téléchargez `onfaa-tunnel-apk`** depuis un run vert du workflow `libXray Android build and real VPN E2E` (onglet Actions → run → Artifacts). Voir [`docs/BUILD_GUIDE.md`](docs/BUILD_GUIDE.md) §« Quel APK installer ».
 
 ## Sécurité
 

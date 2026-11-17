@@ -4,6 +4,20 @@
 
 La compilation et la validation du projet sont réalisées **exclusivement sur GitHub Actions**. Aucun binaire officiel ne doit être considéré comme produit par un build local non documenté comme référence. Aucun contournement masquant un échec (`|| true`, stub de bibliothèque moteur, etc.) n’est autorisé.
 
+## Quel APK installer
+
+L'APK n'est fonctionnel que s'il contient le moteur natif `libgojni.so`. Seul le
+workflow E2E construit l'AAR libXray épinglé (il est gitignoré), donc :
+
+| Artefact | Workflow | Moteur Xray | Utilisable |
+| --- | --- | --- | --- |
+| `onfaa-tunnel-apk` | `libXray Android build and real VPN E2E` | oui (arm64-v8a, armeabi-v7a, x86_64) | **oui, c'est celui à installer** |
+| `onfaa-tunnel-debug-apk-no-engine` | `Android CI` | non | non : compilation seule, aucune connexion possible |
+
+Le workflow E2E vérifie la présence de `libgojni.so` pour chaque ABI avant de
+publier l'APK ; l'application affiche en outre un bandeau explicite quand le
+moteur est absent, au lieu d'échouer silencieusement.
+
 ## État Phase 1 (workflow de validation en place)
 
 Workflow : `.github/workflows/android.yml` (déclencheurs : `push`/`pull_request` sur `main`, `workflow_dispatch`).
@@ -17,7 +31,7 @@ Workflow : `.github/workflows/android.yml` (déclencheurs : `push`/`pull_request
 6. **Validation du wrapper** : `gradle/actions/wrapper-validation@v4`
 7. **Tests unitaires** : `./gradlew :app:testDebugUnitTest --stacktrace`
 8. **Compilation debug** : `./gradlew :app:assembleDebug --stacktrace`
-9. **Artefact APK** : upload `app/build/outputs/apk/debug/*.apk` (`if-no-files-found: error`)
+9. **Artefact APK** : upload `app/build/outputs/apk/debug/*.apk` (`if-no-files-found: error`) sous le nom `onfaa-tunnel-debug-apk-no-engine` ; ce build ne contient **pas** l'AAR libXray et ne peut pas ouvrir de tunnel (voir « Quel APK installer »).
 
 ## Résultats vérifiés (Phase 1)
 
@@ -87,7 +101,7 @@ Workflow : `.github/workflows/libxray-poc.yml` (déclencheurs : `push` sur `main
      -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.token="<token-de-test>"
    ```
 6. Vérification des preuves : XML `VpnTunnelE2ETest` (**6 tests**, 0 échec/erreur/ignoré), journal d’accès Xray contenant `192.0.2.10:18080` **et au moins une ligne par protocole** (`vless-in`, `vmess-in`, `trojan-in`, `ss-in`), absence de `target blocked by a finalrule` dans le journal serveur, collecte des journaux, arrêt des serveurs, suppression de l’alias loopback.
-7. Publication des artefacts : `poc-report` (AAR, preuves, rapports, APK de test) et APK debug fonctionnel.
+7. Publication des artefacts : `poc-report` (AAR, preuves, rapports, APK de test), `onfaa-tunnel-apk` (APK installable avec le moteur, vérifié ABI par ABI) et le résumé SHA-256 de l'APK.
 
 **Sécurité des builds** : le trafic HTTP en clair n’est autorisé que dans le variant **debug** (`app/src/debug/res/xml/network_security_config.xml`) pour la fixture CI ; le variant release garde `cleartextTrafficPermitted=false`.
 
@@ -96,7 +110,7 @@ Workflow : `.github/workflows/libxray-poc.yml` (déclencheurs : `push` sur `main
 ## Phase 4 — persistance, import étendu, cycle de vie (CI verte)
 
 - **Aucun changement de chaîne de build** : Room 2.6.1, DataStore 1.1.1 et l’AAR libXray épinglé restent les seules dépendances ; `org.json:json:20240303` est ajouté en `testImplementation` uniquement (parsing JSON des tests unitaires JVM).
-- **Version** : `versionCode 4`, `versionName 0.4.0-phase4`.
+- **Version** : `versionCode 5`, `versionName 0.5.0-phase5`.
 - **Workflows** : `.github/workflows/android.yml` (compilation, tests unitaires, `assembleDebug`, `assembleDebugAndroidTest`, APK) et `.github/workflows/libxray-poc.yml` (E2E réel + tous les instrumentés).
 - **Portes E2E** : `E2E_XML_VALIDATED`, `ACCESS_LOG_PROVES_TUNNEL_DESTINATION`, `ACCESS_LOG_PER_PROTOCOL_OK`, `--suite VpnTunnelE2ETest --min-tests 6` — un test non exécuté échoue.
 - **Résultats** : Android CI [#44011899010](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44011899010) `success` (commit `230008c`) — 23/23 unitaires, APK debug et APK de tests ; E2E [#44011899095](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44011899095) `success` — 27/27 instrumentés. Artefacts `onfaa-tunnel-debug-apk` et `libxray-poc-report`. Détail : `docs/PHASE_4_REPORT.md`.

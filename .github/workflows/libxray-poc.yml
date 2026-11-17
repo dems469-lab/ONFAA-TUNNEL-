@@ -457,6 +457,39 @@ jobs:
           :app:assembleDebugAndroidTest
           --stacktrace
 
+      # The Android CI workflow builds an APK without the AAR (it is gitignored
+      # and only produced here). That APK has no Xray engine and cannot open a
+      # tunnel, so the only installable APK is the one built here. Refuse to
+      # publish an APK that lost its engine or one of the phone ABIs.
+      - name: Verify the installable APK embeds the official engine
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="$(ls app/build/outputs/apk/debug/*.apk | head -n 1)"
+          test -s "$APK"
+          ENTRIES="$(unzip -Z1 "$APK")"
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            if ! grep -qx "lib/$abi/libgojni.so" <<<"$ENTRIES"; then
+              echo "::error::libgojni.so missing for $abi in $APK"
+              exit 1
+            fi
+          done
+          echo "Engine present for arm64-v8a, armeabi-v7a and x86_64"
+
+      - name: Record installable APK digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="$(ls app/build/outputs/apk/debug/*.apk | head -n 1)"
+          sha256sum "$APK" | tee "$GITHUB_WORKSPACE/poc-report/apk.sha256"
+          {
+            echo ""
+            echo "### APK installable (moteur Xray embarqué)"
+            echo '```'
+            cat "$GITHUB_WORKSPACE/poc-report/apk.sha256"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Enable KVM for the Android emulator
         shell: bash
         run: |
@@ -644,6 +677,16 @@ jobs:
             echo "E2E_VMESS_PORT=$E2E_VMESS_PORT"
             echo "E2E_PROBE_URL=http://$E2E_ANSWER_IP:$E2E_HTTP_PORT/token"
           } > "$GITHUB_WORKSPACE/poc-report/build-env.txt"
+
+      # Dedicated, unambiguous artifact: this is the APK a person installs.
+      # The PoC report keeps the raw evidence but is not meant for sideloading.
+      - name: Publish the installable APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: onfaa-tunnel-apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
 
       - name: Upload PoC report and artifacts
         if: always()

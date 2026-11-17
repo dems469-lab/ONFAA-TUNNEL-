@@ -6,6 +6,14 @@ Le format s’inspire de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/
 
 ## [Unreleased]
 
+### Correctif — l'APK publié par Android CI ne contenait pas le moteur
+
+- **Cause réelle du « VPN non fonctionnel »** : `android.yml` publiait sous le nom `onfaa-tunnel-debug-apk` un APK construit **sans** l'AAR libXray (gitignoré, produit uniquement par le workflow E2E). Vérification sur l'artefact du run #44020633036 : aucun `lib/*/libgojni.so`, aucune classe `libXray.*`. À l'exécution, `XrayBridge.isAvailable()` renvoyait `false` et toute connexion échouait sur « Moteur libXray indisponible dans cette compilation ».
+- **Publication** : le workflow E2E publie désormais un artefact dédié `onfaa-tunnel-apk`, après vérification que `libgojni.so` est présent pour `arm64-v8a`, `armeabi-v7a` et `x86_64`, avec le SHA-256 dans le résumé du run. L'artefact Android CI est renommé `onfaa-tunnel-debug-apk-no-engine` et le workflow émet un avertissement explicite.
+- **Application** : l'écran d'accueil détecte l'absence du moteur, affiche un bandeau explicite et désactive « Connexion » au lieu d'échouer après la demande de permission.
+- **Version** : `versionCode 5`, `versionName 0.5.0-phase5`.
+- **Docs** : `README.md` et `docs/BUILD_GUIDE.md` indiquent désormais quel artefact installer.
+
 ### Phase 5 — lot 1 : Trojan, Shadowsocks et SOCKS5 via le moteur Xray (livré, CI verte)
 - **Protocoles** : `TunnelProtocol` gagne `TROJAN`, `SHADOWSOCKS` et `SOCKS` (libellés UI `Trojan`, `Shadowsocks`, `SOCKS5`) ; le moteur reste XTLS/Xray-core v26.11.9 via libXray v26.11.9, aucun ajout de sing-box ni de faux moteur. Aucune migration Room : le nom de l’énumération est stocké tel quel.
 - **Import** : liens `trojan://`, `ss://` (SIP002 base64) et `socks://` (userinfo base64) convertis par `convertShareLinksToXrayJson`, plus les sorties JSON `trojan`, `shadowsocks` et `socks` (forme plate ou `settings.servers[0]`, une seule entrée). Validation adaptée au protocole : UUID (VLESS/VMess), mot de passe (Trojan), méthode + mot de passe (Shadowsocks), aucun identifiant requis (SOCKS5). Messages d’erreur précis et assainis.
