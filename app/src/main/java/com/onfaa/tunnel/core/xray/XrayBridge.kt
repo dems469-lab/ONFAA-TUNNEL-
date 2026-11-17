@@ -7,6 +7,7 @@ import java.lang.reflect.InvocationHandler
 import java.lang.reflect.InvocationTargetException
 import java.lang.reflect.Method
 import java.lang.reflect.Proxy
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Bridge to the official libXray gomobile AAR (contract API v3).
@@ -136,34 +137,62 @@ object XrayBridge {
     }
 
     /**
-     * Registers the Android VpnService socket protector for both dialers and
-     * listeners. [protect] is called with the raw native fd and must return
-     * true when VpnService.protect(fd) succeeded.
+     * Current VpnService protector. Kept behind a delegate because Xray-core's
+     * controller list is append-only (`transport/internet.RegisterDialerController`
+     * appends to `internet.Controllers` and every dial must satisfy *all* of
+     * them, without any unregister API). Registering a controller per connect
+     * would leak dead services, and registering a `false` controller would make
+     * every later dial fail with "protect Android VPN socket failed" for the
+     * whole life of the process.
+     */
+    private val protectDelegate = AtomicReference<(Int) -> Boolean>({ false })
+
+    @Volatile
+    private var protectorRegistered = false
+
+    /**
+     * Installs [protect] as the Android VpnService socket protector. [protect]
+     * receives the raw native fd and must return true when
+     * VpnService.protect(fd) succeeded.
+     *
+     * The gomobile controller is registered exactly once per process; later
+     * calls only swap the delegate.
      */
     fun registerSocketProtector(protect: (Int) -> Boolean): Boolean = try {
-        val iface = Class.forName("libXray.DialerController")
-        val proxy = newControllerProxy(iface, protect)
-        val libClass = resolveInvoke().second.declaringClass
-        libClass.getMethod("registerDialerController", iface).invoke(null, proxy)
-        libClass.getMethod("registerListenerController", iface).invoke(null, proxy)
-        controllerRef = proxy
+        protectDelegate.set(protect)
+        if (!protectorRegistered) {
+            synchronized(this) {
+                if (!protectorRegistered) {
+                    val iface = Class.forName("libXray.DialerController")
+                    val proxy = newControllerProxy(iface) { fd -> protectDelegate.get().invoke(fd) }
+                    val libClass = resolveInvoke().second.declaringClass
+                    libClass.getMethod("registerDialerController", iface).invoke(null, proxy)
+                    libClass.getMethod("registerListenerController", iface).invoke(null, proxy)
+                    controllerRef = proxy
+                    protectorRegistered = true
+                }
+            }
+        }
         true
     } catch (_: Throwable) {
         false
     }
 
     /**
-     * Replaces the service-bound protector with a no-op so the Go runtime does
-     * not keep a reference to a destroyed VpnService.
+     * Drops the service-bound protector so the Go runtime does not keep
+     * dialing with a destroyed VpnService. It only clears the delegate: the
+     * registered controller stays alive (Xray-core cannot unregister it) and
+     * rejects dials instead of letting them escape the VPN unprotected.
      */
     fun clearSocketProtector() {
-        runCatching { registerSocketProtector { false } }
+        protectDelegate.set { false }
     }
 
     fun setDNS(protect: (Int) -> Boolean, server: String) {
         try {
+            protectDelegate.set(protect)
             val iface = Class.forName("libXray.DialerController")
-            val proxy = newControllerProxy(iface, protect)
+            val proxy = newControllerProxy(iface) { fd -> protectDelegate.get().invoke(fd) }
             val libClass = resolveInvoke().second.declaringClass
             libClass.getMethod("setDNS", iface, String::class.java).invoke(null, proxy, server)
             controllerRef = proxy
@@ -190,12 +219,31 @@ object XrayBridge {
     private class ControllerHandler(private val protect: (Int) -> Boolean) : InvocationHandler {
         override fun invoke(proxy: Any, method: Method, args: Array<out Any?>?): Any? =
             when (method.name) {
-                "protectFd" -> protect((args?.firstOrNull() as? Number)?.toInt() ?: -1)
+                "protectFd" -> try {
+                    protect((args?.firstOrNull() as? Number)?.toInt() ?: -1)
+                } catch (_: Throwable) {
+                    // A Java exception must never propagate into the Go runtime
+                    // through the JNI callback: report the socket as unprotected.
+                    false
+                }
                 "toString" -> "OnfaaDialerController"
                 "hashCode" -> System.identityHashCode(proxy)
                 "equals" -> proxy === args?.firstOrNull()
-                else -> throw UnsupportedOperationException(method.name)
+                // Fail closed, but never throw inside a native callback.
+                else -> defaultValue(method.returnType)
             }
+
+        private fun defaultValue(type: Class<*>): Any? = when (type) {
+            java.lang.Boolean.TYPE -> false
+            java.lang.Integer.TYPE -> 0
+            java.lang.Long.TYPE -> 0L
+            java.lang.Double.TYPE -> 0.0
+            java.lang.Float.TYPE -> 0f
+            java.lang.Short.TYPE -> 0.toShort()
+            java.lang.Byte.TYPE -> 0.toByte()
+            java.lang.Character.TYPE -> '\u0000'
+            else -> null
+        }
     }
 
     private fun unwrap(t: Throwable): Throwable =

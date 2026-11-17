@@ -97,7 +97,8 @@ object ConfigImporter {
         val sanitized = XrayErrorSanitizer.sanitize(error)
         return when {
             sanitized.contains("no valid outbound", ignoreCase = true) ->
-                "Lien VLESS/VMess invalide : aucun serveur exploitable"
+                "Lien VLESS/VMess invalide : aucun serveur exploitable " +
+                    "(Xray refuse notamment un VLESS public sans TLS ni chiffrement)"
             sanitized.contains("unsupported share format", ignoreCase = true) ->
                 "Format de lien non reconnu"
             sanitized.contains("isolated process", ignoreCase = true) ->

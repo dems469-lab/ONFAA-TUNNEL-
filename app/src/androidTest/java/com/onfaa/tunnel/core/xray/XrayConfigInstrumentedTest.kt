@@ -19,8 +19,13 @@ import org.junit.runner.RunWith
 class XrayConfigInstrumentedTest {
 
     private val uuid = "00000000-0000-4000-8000-000000000001"
+
+    // Xray refuses a VLESS outbound without TLS/encryption when the server is a
+    // public address ("vless without TLS or other encryption is prohibited
+    // unless the server address is a private IP or domain"), so the plain-VLESS
+    // fixture uses a LAN address. Public VLESS is covered by the TLS test.
     private val vlessLink =
-        "vless://$uuid@192.0.2.1:443?encryption=none&security=none&type=tcp#Test%20VLESS"
+        "vless://$uuid@192.168.1.10:443?encryption=none&security=none&type=tcp#Test%20VLESS"
     private val vmessLink =
         "vmess://$uuid@192.0.2.1:443?encryption=auto&security=none&type=tcp#Test%20VMess"
 
@@ -56,9 +61,26 @@ class XrayConfigInstrumentedTest {
         val outbound = outbounds.getJSONObject(0)
         assertEquals("vless", outbound.getString("protocol"))
         val settings = outbound.getJSONObject("settings")
-        assertEquals("192.0.2.1", settings.getString("address"))
+        assertEquals("192.168.1.10", settings.getString("address"))
         assertEquals(443, settings.getInt("port"))
         assertEquals("none", settings.getString("encryption"))
+    }
+
+    /**
+     * A public VLESS endpoint over TLS must import through the real engine: the
+     * plain-VLESS fixture above is only accepted because LAN addresses are
+     * exempt from Xray's "no VLESS without TLS" rule.
+     */
+    @Test
+    fun convertsPublicVlessTlsShareLinkWithEngine() = runBlocking {
+        val response = XrayBridge.convertShareLink(
+            "vless://$uuid@vless.example.com:443?encryption=none&security=tls&sni=vless.example.com&type=tcp#TLS"
+        )
+        assertTrue(response.error, response.success)
+        val outbound = response.data!!.getJSONArray("outbounds").getJSONObject(0)
+        assertEquals("vless", outbound.getString("protocol"))
+        assertEquals("tls", outbound.getJSONObject("streamSettings").getString("security"))
+        assertEquals("vless.example.com", outbound.getJSONObject("settings").getString("address"))
     }
 
     @Test
@@ -117,6 +139,10 @@ class XrayConfigInstrumentedTest {
 
     @Test
     fun socketProtectorAndDnsControllersAreCallable() {
+        // Xray-core's controller list is append-only and every dial must satisfy
+        // all registered controllers, so this process-wide registration must
+        // always return true: a `false` controller would break the real E2E
+        // dials that run later in this same instrumentation process.
         assertTrue(XrayBridge.registerSocketProtector { true })
         XrayBridge.setDNS({ true }, "1.1.1.1:53")
         XrayBridge.resetDNS()

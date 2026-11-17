@@ -7,9 +7,11 @@ import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.net.TrafficStats
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
+import android.os.Process
 import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.NotificationCompat
@@ -24,10 +26,12 @@ import com.onfaa.tunnel.domain.model.TunnelProfile
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
@@ -73,6 +77,7 @@ class OnfaaTunnelVpnService : VpnService() {
 
     private var tun: ParcelFileDescriptor? = null
     private var engineRunning = false
+    private var trafficJob: Job? = null
 
     @Volatile
     private var destroyed = false
@@ -169,6 +174,9 @@ class OnfaaTunnelVpnService : VpnService() {
                 throw IllegalStateException("Impossible d'enregistrer la protection des sockets VPN")
             }
             XrayBridge.setDNS(protector, resolverEndpoint)
+            if (isDebuggable) {
+                diagnoseProtectedUpstream(profile.endpoint)
+            }
 
             val config = XrayConfigBuilder.build(
                 profile = profile,
@@ -209,6 +217,8 @@ class OnfaaTunnelVpnService : VpnService() {
                     sinceEpochMs = System.currentTimeMillis()
                 )
             )
+            TunnelStatusRepository.log("Connecté avec succès")
+            startTrafficSampling()
             updateNotification("Connecté — ${profile.displayName}")
         } catch (c: kotlinx.coroutines.CancellationException) {
             teardownEngine()
@@ -233,6 +243,7 @@ class OnfaaTunnelVpnService : VpnService() {
         TunnelStatusRepository.log(reason)
         teardownEngine()
         TunnelStatusRepository.set(TunnelState.Idle)
+        TunnelStatusRepository.log("Tunnel arrêté", LogSeverity.INFO)
         stopForegroundCompat()
         stopSelf()
     }
@@ -291,6 +302,29 @@ class OnfaaTunnelVpnService : VpnService() {
     private val isDebuggable: Boolean
         get() = (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
 
+    /**
+     * Debug-build only: a real protected TCP connection to the upstream
+     * endpoint before the engine starts. It separates VPN socket-routing
+     * failures (the errno is logged) from Xray protocol failures. Release
+     * builds never run it.
+     */
+    private fun diagnoseProtectedUpstream(endpoint: String) {
+        val separator = endpoint.lastIndexOf(':')
+        if (separator <= 0) return
+        val host = endpoint.substring(0, separator)
+        val port = endpoint.substring(separator + 1).toIntOrNull() ?: return
+        try {
+            java.net.Socket().use { socket ->
+                val granted = protect(socket)
+                Log.i(TAG, "Upstream probe $host:$port protected=$granted")
+                socket.connect(java.net.InetSocketAddress(host, port), 5_000)
+                Log.i(TAG, "Upstream probe $host:$port connected=${socket.isConnected}")
+            }
+        } catch (t: Throwable) {
+            Log.w(TAG, "Upstream probe $host:$port failed: ${t.javaClass.simpleName}: ${t.message}")
+        }
+    }
+
     private fun buildTun(): ParcelFileDescriptor? {
         val builder = Builder()
             .setSession("ONFAA TUNNEL")
@@ -308,7 +342,64 @@ class OnfaaTunnelVpnService : VpnService() {
         }
     }
 
+    /**
+     * Samples android.net.TrafficStats for the app UID. Xray's proxy sockets
+     * belong to this process, so the deltas are real session traffic. The
+     * platform can return UNSUPPORTED (-1): in that case the UI is told the
+     * counters are unavailable rather than displaying invented values.
+     */
+    private fun startTrafficSampling() {
+        trafficJob?.cancel()
+        val uid = Process.myUid()
+        val baseRx = TrafficStats.getUidRxBytes(uid)
+        val baseTx = TrafficStats.getUidTxBytes(uid)
+        if (baseRx < 0L || baseTx < 0L) {
+            TrafficStatsRepository.markUnavailable()
+            TunnelStatusRepository.log(
+                "Compteurs de trafic indisponibles sur cet appareil",
+                LogSeverity.WARNING
+            )
+            return
+        }
+        TrafficStatsRepository.start(System.currentTimeMillis())
+        trafficJob = scope.launch {
+            var lastRx = baseRx
+            var lastTx = baseTx
+            var lastElapsed = SystemClock.elapsedRealtime()
+            while (isActive) {
+                delay(1_000L)
+                val rx = TrafficStats.getUidRxBytes(uid)
+                val tx = TrafficStats.getUidTxBytes(uid)
+                if (rx < 0L || tx < 0L) {
+                    TrafficStatsRepository.markUnavailable()
+                    break
+                }
+                val now = SystemClock.elapsedRealtime()
+                val elapsed = (now - lastElapsed).coerceAtLeast(1L)
+                val downRate = ((rx - lastRx).coerceAtLeast(0L) * 1_000L) / elapsed
+                val upRate = ((tx - lastTx).coerceAtLeast(0L) * 1_000L) / elapsed
+                TrafficStatsRepository.update(
+                    downBytes = rx - baseRx,
+                    upBytes = tx - baseTx,
+                    downBytesPerSec = downRate,
+                    upBytesPerSec = upRate,
+                    sampleEpochMs = System.currentTimeMillis()
+                )
+                lastRx = rx
+                lastTx = tx
+                lastElapsed = now
+            }
+        }
+    }
+
+    private fun stopTrafficSampling() {
+        trafficJob?.cancel()
+        trafficJob = null
+        TrafficStatsRepository.stop()
+    }
+
     private suspend fun teardownEngine() = withContext(NonCancellable) {
+        stopTrafficSampling()
         runCatching { XrayBridge.stopXray() }
             .onFailure { TunnelStatusRepository.log("Arrêt Xray : ${XrayErrorSanitizer.sanitize(it.message)}") }
         runCatching { XrayBridge.resetDNS() }
