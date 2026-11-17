@@ -28,7 +28,7 @@ class ServerConfigTest {
     @Test
     fun `user preferences default to safe non-connected values`() {
         val prefs = UserPreferences()
-        assertEquals("system", prefs.themeKey)
+        assertEquals("onfaa", prefs.themeKey)
         assertEquals(null, prefs.selectedConfigId)
         assertFalse(prefs.autoConnect)
     }
