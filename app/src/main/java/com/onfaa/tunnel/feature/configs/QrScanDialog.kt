@@ -51,9 +51,9 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.BinaryBitmap
 import com.google.zxing.DecodeHintType
+import com.google.zxing.LuminanceSource
 import com.google.zxing.NotFoundException
 import com.google.zxing.common.HybridBinarizer
-import com.google.zxing.common.PlanarYUVLuminanceSource
 import com.google.zxing.qrcode.QRCodeReader
 import com.onfaa.tunnel.ui.components.GradientButton
 import com.onfaa.tunnel.ui.theme.OnfaaTheme
@@ -252,7 +252,7 @@ private fun analyzeFrame(
         val outW = uprightWidth(image)
         val outH = uprightHeight(image)
         val luminance = uprightLuminance(image) ?: return
-        val source = PlanarYUVLuminanceSource(luminance, outW, outH, 0, 0, outW, outH, false)
+        val source = UprightLuminanceSource(luminance, outW, outH)
         val result = try {
             QRCodeReader().decode(
                 BinaryBitmap(HybridBinarizer(source)),
@@ -277,6 +277,22 @@ private fun analyzeFrame(
 
 private fun normalizedRotation(image: ImageProxy): Int =
     ((image.imageInfo.rotationDegrees % 360) + 360) % 360
+
+/** Read-only luminance source over the already uprighted Y buffer. */
+private class UprightLuminanceSource(
+    private val luma: ByteArray,
+    width: Int,
+    height: Int
+) : LuminanceSource(width, height) {
+
+    override fun getRow(y: Int, row: ByteArray?): ByteArray {
+        val target = row ?: ByteArray(width)
+        System.arraycopy(luma, y * width, target, 0, width)
+        return target
+    }
+
+    override fun getMatrix(): ByteArray = luma
+}
 
 private fun uprightWidth(image: ImageProxy): Int {
     val rotation = normalizedRotation(image)

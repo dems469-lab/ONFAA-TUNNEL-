@@ -890,7 +890,7 @@ private fun ImportConfigDialog(
     fun pasteFromClipboard() {
         if (importing) return
         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-        val text = clipboard?.readPrimaryClip()?.let { clip ->
+        val text = clipboard?.primaryClip?.let { clip ->
             (0 until clip.itemCount).firstNotNullOfOrNull { index ->
                 clip.getItemAt(index)?.coerceToText(context)
             }
