@@ -4,6 +4,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
+import android.content.pm.ApplicationInfo
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.VpnService
@@ -126,11 +127,14 @@ class OnfaaTunnelVpnService : VpnService() {
             // Validate with an inert descriptor first (fd 0 is a valid, harmless
             // file in the app process): testXray only constructs handlers and
             // never reads the TUN. The live VPN descriptor is created afterwards.
+            val engineLogLevel = if (isDebuggable) "info" else XrayConfigBuilder.DEFAULT_LOG_LEVEL
+            Log.i(TAG, "Engine mode: ${profile.protocol.name} -> ${profile.endpoint} (log=$engineLogLevel)")
             val validation = XrayBridge.testXray(
                 XrayConfigBuilder.build(
                     profile = profile,
                     tunFd = 0,
-                    dnsEndpoints = listOf(dnsEndpoint)
+                    dnsEndpoints = listOf(dnsEndpoint),
+                    logLevel = engineLogLevel
                 )
             )
             if (!validation.success) {
@@ -144,6 +148,7 @@ class OnfaaTunnelVpnService : VpnService() {
             Log.i(TAG, "TUN established")
 
             val protectFailures = AtomicInteger(0)
+            val protectSuccesses = AtomicInteger(0)
             val protector: (Int) -> Boolean = { fd ->
                 val protected = try {
                     protect(fd)
@@ -151,7 +156,11 @@ class OnfaaTunnelVpnService : VpnService() {
                     Log.w(TAG, "VpnService.protect threw ${t.javaClass.simpleName}")
                     false
                 }
-                if (!protected && protectFailures.incrementAndGet() <= 5) {
+                if (protected) {
+                    if (protectSuccesses.incrementAndGet() == 1) {
+                        Log.i(TAG, "VpnService.protect granted for an engine socket")
+                    }
+                } else if (protectFailures.incrementAndGet() <= 5) {
                     Log.w(TAG, "VpnService.protect returned false for an engine socket")
                 }
                 protected
@@ -164,7 +173,8 @@ class OnfaaTunnelVpnService : VpnService() {
             val config = XrayConfigBuilder.build(
                 profile = profile,
                 tunFd = descriptor.fd,
-                dnsEndpoints = listOf(dnsEndpoint)
+                dnsEndpoints = listOf(dnsEndpoint),
+                logLevel = engineLogLevel
             )
 
             val started = XrayBridge.runXray(config)
@@ -277,6 +287,9 @@ class OnfaaTunnelVpnService : VpnService() {
         return TunnelConfigRepository.selectedProfile()
             ?: throw IllegalStateException("Aucune configuration sélectionnée")
     }
+
+    private val isDebuggable: Boolean
+        get() = (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
 
     private fun buildTun(): ParcelFileDescriptor? {
         val builder = Builder()

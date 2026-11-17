@@ -22,6 +22,7 @@ object XrayConfigBuilder {
     const val TUN_INTERFACE_NAME = "onfaa0"
     const val DEFAULT_MTU = 1500
     const val DEFAULT_RESOLVER_ENDPOINT = "1.1.1.1:53"
+    const val DEFAULT_LOG_LEVEL = "warning"
     val DEFAULT_DNS_ENDPOINTS = listOf("1.1.1.1:53", "8.8.8.8:53")
 
     private val privateNetworks = listOf(
@@ -39,7 +40,8 @@ object XrayConfigBuilder {
         profile: TunnelProfile,
         tunFd: Int,
         mtu: Int = DEFAULT_MTU,
-        dnsEndpoints: List<String> = DEFAULT_DNS_ENDPOINTS
+        dnsEndpoints: List<String> = DEFAULT_DNS_ENDPOINTS,
+        logLevel: String = DEFAULT_LOG_LEVEL
     ): String {
         require(profile.protocol == TunnelProtocol.VLESS || profile.protocol == TunnelProtocol.VMESS) {
             "Only VLESS and VMess are supported"
@@ -50,7 +52,7 @@ object XrayConfigBuilder {
         outbound.put("tag", PROXY_OUTBOUND_TAG)
 
         val config = JSONObject()
-        config.put("log", JSONObject().put("loglevel", "warning"))
+        config.put("log", JSONObject().put("loglevel", logLevel))
         config.put("env", JSONObject().put("xray.tun.fd", tunFd.toString()))
 
         config.put("dns", JSONObject()
