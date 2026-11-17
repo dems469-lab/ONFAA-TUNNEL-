@@ -15,7 +15,7 @@ class ConfigImporterValidationTest {
 
     @Test
     fun rejectsUnsupportedScheme() = runBlocking {
-        val error = ConfigImporter.importLink("ss://YWVzOnBhc3M@example.com:8388").exceptionOrNull()
+        val error = ConfigImporter.importLink("hysteria2://secret@example.com:443").exceptionOrNull()
         assertTrue(error is ConfigException)
         assertTrue(error?.message.orEmpty().contains("non pris en charge"))
     }
