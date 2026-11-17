@@ -190,6 +190,9 @@ Scénarios :
 - **Run :** [libXray Android build and real VPN E2E #44004893595](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44004893595)
   — `success`, **25/25 étapes vertes** (2026-11-17 02:42:01Z → 02:49:55Z).
 - **Commit validé :** `5f518313082fc095eeb118553b6fd969318cddfd` (`main`).
+- **Run de confirmation (CI allégée) :** [libXray Android build and real VPN E2E #44006718908](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44006718908)
+  — `success` sur le commit `aef515e` (workflow uniquement) : 21/21 tests
+  instrumentés (45,164 s), `vless=3 vmess=3`, aucune régression des portes de preuve.
 - **Artefact :** `libxray-poc-report` (122 253 621 octets) avec `libXray.aar`,
   `app-debug.apk` (155 889 248 octets, `libgojni.so` pour les 4 ABIs),
   `app-debug-androidTest.apk`, XML de tests, `logcat` par test, `server.json`,

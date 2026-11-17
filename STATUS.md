@@ -12,6 +12,7 @@
 - **Branche principale :** `main`
 - **Commit Phase 3 (code) :** `5f518313082fc095eeb118553b6fd969318cddfd`
 - **Run CI Phase 3 réussi :** [libXray Android build and real VPN E2E #44004893595](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44004893595) — `success`, 25/25 étapes
+- **Run de confirmation (CI allégée, commit `aef515e`) :** [#44006718908](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44006718908) — `success`, 21/21 instrumentés, `vless=3 vmess=3`
 - **Dernier commit Phase 2B validé :** `f116442021b4e80508e3ef2448d21980f2207534`
 - **Run Phase 2B réussi :** [#43965698249](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/43965698249)
 
