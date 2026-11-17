@@ -40,6 +40,7 @@ Versions épinglées et choix documentés dans [`docs/DECISIONS.md`](docs/DECISI
 - Preuve de concept Android libXray (Phase 2B) : [`docs/LIBXRAY_ANDROID_POC.md`](docs/LIBXRAY_ANDROID_POC.md)
 - Rapport Phase 3 (tunnel réel) : [`docs/PHASE_3_REPORT.md`](docs/PHASE_3_REPORT.md)
 - Rapport Phase 4 (persistance, import, cycle de vie) : [`docs/PHASE_4_REPORT.md`](docs/PHASE_4_REPORT.md)
+- Plan de parité inspiré de SNI Tunnel (proposition) : [`docs/PHASE_5_PARITY_PLAN.md`](docs/PHASE_5_PARITY_PLAN.md)
 
 ## Structure du projet
 
