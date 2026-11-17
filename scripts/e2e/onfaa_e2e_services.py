@@ -2,16 +2,18 @@
 """Deterministic end-to-end services for the ONFAA TUNNEL CI test.
 
 Runs three local servers:
-  * a token HTTP server bound to a TEST-NET address (192.0.2.10 by default)
-    that is added to the host loopback alias by the workflow;
+  * a token HTTP server bound to the host loopback (127.0.0.1:18080). The
+    official Xray-core server redirects the TEST-NET destination
+    (192.0.2.10:18080) to this listener with a freedom outbound override;
   * a minimal UDP DNS responder for onfaa.test -> 192.0.2.10;
   * the same responder over DNS-over-TCP (RFC 7766), because the Android
     emulator's 10.0.2.2 host-loopback alias is reliable for TCP while UDP
     forwarding to the host loopback is not guaranteed.
 
-The emulator cannot reach 192.0.2.10 directly. A successful HTTP request from
+Nothing listens on 192.0.2.10:18080 itself, and that TEST-NET address is not
+reachable from the emulator's default route. A successful HTTP request from
 the Android app therefore proves the packet went through the real Xray client,
-the official Xray-core server, and its freedom outbound.
+the official Xray-core server, and its redirecting freedom outbound.
 """
 
 from __future__ import annotations
@@ -168,7 +170,7 @@ def run_dns_tcp(bind: str, port: int, answer_ip: str) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--http-bind", default="192.0.2.10")
+    parser.add_argument("--http-bind", default="127.0.0.1")
     parser.add_argument("--http-port", type=int, default=18080)
     parser.add_argument("--dns-bind", default="127.0.0.1")
     parser.add_argument("--dns-port", type=int, default=15353)

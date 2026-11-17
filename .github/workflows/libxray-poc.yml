@@ -199,7 +199,7 @@ jobs:
           mkdir -p "$E2E_DIR"
           sudo ip addr add "$E2E_ANSWER_IP/32" dev lo
           python3 scripts/e2e/onfaa_e2e_services.py \
-            --http-bind "$E2E_ANSWER_IP" --http-port "$E2E_HTTP_PORT" \
+            --http-bind 127.0.0.1 --http-port "$E2E_HTTP_PORT" \
             --dns-bind 127.0.0.1 --dns-port "$E2E_DNS_PORT" \
             --answer-ip "$E2E_ANSWER_IP" --token "$E2E_TOKEN" \
             > "$E2E_DIR/services.log" 2>&1 &
@@ -228,7 +228,24 @@ jobs:
                 }
               }
             ],
-            "outbounds": [{"protocol": "freedom", "tag": "direct"}]
+            "routing": {
+              "rules": [
+                {
+                  "type": "field",
+                  "ip": ["$E2E_ANSWER_IP"],
+                  "port": $E2E_HTTP_PORT,
+                  "outboundTag": "token-redirect"
+                }
+              ]
+            },
+            "outbounds": [
+              {"protocol": "freedom", "tag": "direct"},
+              {
+                "protocol": "freedom",
+                "tag": "token-redirect",
+                "settings": {"redirect": "127.0.0.1:$E2E_HTTP_PORT"}
+              }
+            ]
           }
           EOF
           "$E2E_DIR/xray" -test -c "$E2E_DIR/server.json"
@@ -287,7 +304,7 @@ jobs:
 
           wait_tcp("127.0.0.1", 18443, "VLESS inbound")
           wait_tcp("127.0.0.1", 18444, "VMess inbound")
-          wait_tcp(answer_ip, http_port, "token HTTP")
+          wait_tcp("127.0.0.1", http_port, "token HTTP")
           wait_dns_tcp("127.0.0.1", dns_port)
           print("E2E responders ready (Xray, token HTTP, DNS/TCP)")
           PY
@@ -296,7 +313,7 @@ jobs:
             cat "$E2E_DIR/services.log"
             exit 1
           fi
-          curl -fsS "http://$E2E_ANSWER_IP:$E2E_HTTP_PORT/token" -o "$E2E_DIR/token.txt"
+          curl -fsS "http://127.0.0.1:$E2E_HTTP_PORT/token" -o "$E2E_DIR/token.txt"
           test -s "$E2E_DIR/token.txt" || { cat "$E2E_DIR/services.log"; exit 1; }
           test "$(cat "$E2E_DIR/token.txt")" = "$E2E_TOKEN"
           echo "E2E servers ready: Xray $E2E_VLESS_PORT/$E2E_VMESS_PORT, token $E2E_HTTP_PORT, DNS $E2E_DNS_PORT"
