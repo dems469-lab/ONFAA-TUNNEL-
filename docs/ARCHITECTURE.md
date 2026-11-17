@@ -25,7 +25,7 @@
 - **Chaîne réelle** : `MainActivity`/Compose → `TunnelConfigRepository`/`TunnelStatusRepository` → `OnfaaTunnelVpnService` → `XrayBridge` → `libXray.LibXray#invoke` / `setDNS` / `registerDialerController` → **Xray-core officiel**.
 - **Contrat TUN** : le descripteur du `VpnService` est transmis au moteur via `env["xray.tun.fd"]` (Xray-core v26.11.9 ; libXray n’expose plus `SetTunFd`). Le service Android possède adresses/routes/DNS ; l’inbound `tun` lit le descripteur.
 - **Protection des sockets** : les sockets du moteur sont protégés par `VpnService.protect(fd)` via un `DialerController` réel, pour éviter la boucle VPN. `setDNS`/`resetDNS` configurent le résolveur Go utilisé par libXray. Xray-core **empile** les contrôleurs de dial (`transport/internet.RegisterDialerController` n’a pas de désinscription et tout dial doit satisfaire tous les contrôleurs) : le pont enregistre donc **un seul** contrôleur par processus, derrière un délégué `AtomicReference` que le service remplace à la connexion et vide à l’arrêt. Un second enregistrement, même temporairement refusant, casserait tous les dials du processus.
-- **Configuration** : lien VLESS/VMess → `convertShareLinksToXrayJson` (libXray) → outbound réel → configuration TUN complète (`XrayConfigBuilder`) → `testXray` → `runXray`.
+- **Configuration** : lien VLESS/VMess/Trojan/Shadowsocks/SOCKS5 → `convertShareLinksToXrayJson` (libXray) → outbound réel → configuration TUN complète (`XrayConfigBuilder`) → `testXray` → `runXray`.
 - **DNS/routage** : port 53 issu du TUN → `dns-out` ; requêtes DNS internes → sortie directe ; réseaux privés → direct ; trafic restant → proxy.
 - **États** : `Idle`/`Connecting`/`Verifying`/`Connected`/`Disconnecting`/`Error`. `Connected` exige `runXray` réussi, `getXrayState=true` et une **sonde HTTP réelle** à travers le tunnel.
 - **Arrêt** : `stopXray` → `resetDNS` → neutralisation du protector → fermeture du TUN → arrêt du foreground → `stopSelf` ; gestion de `onRevoke`/`onDestroy`.
@@ -39,11 +39,18 @@
 - **Migration `1 → 2`** : la table est recréée explicitement (pas d’`ALTER TABLE ... DEFAULT`) puis les lignes sont copiées ; les lignes v1 survivent avec `security='none'` et `payloadCipher=''`. Elles sont affichées comme **incomplètes** et ne peuvent pas être connectées tant que le lien n’est pas réimporté (v1 ne stockait aucun identifiant). Test instrumenté dédié (`ProfileStorageInstrumentedTest`).
 - **Protection des données sensibles** : l’outbound Xray (UUID, clés) est chiffré en **AES-256-GCM** par `SecretCipher`, avec une clé non exportable générée dans le **Android Keystore** (alias `onfaa_server_payload_v1`). Seul le texte chiffré (`base64(iv||ciphertext)`) est écrit dans Room ; un échec de chiffrement annule l’enregistrement, jamais de repli en clair. Les champs d’affichage (nom, protocole, hôte, sécurité) restent en clair car nécessaires à l’UI.
 - **Sélection persistée** : identifiant du profil actif dans DataStore (`onfaa_preferences`, clé `selected_config_id`), favoris dans Room.
-- **Import étendu** : `ConfigImporter` accepte un lien `vless://`/`vmess://`, un **objet outbound** ou une **configuration Xray JSON** (une seule sortie VLESS/VMess exigée ; `settings.vnext[0].users[0]` aplati), du **presse-papiers** et un **fichier** (via `ActivityResultContracts.OpenDocument`, limite 256 Ko). La structure est validée avant l’appel natif, puis `testXray` valide la configuration ; rien n’est enregistré si le moteur refuse.
+- **Import étendu** : `ConfigImporter` accepte un lien `vless://`/`vmess://`/`trojan://`/`ss://`/`socks://`, un **objet outbound** ou une **configuration Xray JSON** (une seule sortie parmi VLESS, VMess, Trojan, Shadowsocks, SOCKS5 ; `settings.vnext[0].users[0]` et `settings.servers[0]` aplatis), du **presse-papiers** et un **fichier** (via `ActivityResultContracts.OpenDocument`, limite 256 Ko). La structure est validée avant l’appel natif, puis `testXray` valide la configuration ; rien n’est enregistré si le moteur refuse.
 - **Cycle de vie VPN** : états `AwaitingPermission`, `Preparing`, `Connecting`, `Verifying`, `Connected`, `Reconnecting(attempt)`, `Disconnecting`, `Error` en plus de `Idle`. Une surveillance post-connexion rejoue une **sonde réelle** toutes les 20 s ; en cas d’échec l’état passe immédiatement à `Reconnecting` (jamais `Connected`), une fenêtre de reconnexion bornée (90 s, sonde toutes les 5 s) est ouverte, et `Connected` n’est republié qu’après une sonde réussie. Au-delà, erreur réelle et arrêt propre. Double démarrage refusé (mutex + état + `engineRunning`). Profil incomplet refusé avec message explicite.
 - **Journaux** : tampon mémoire borné (500 événements) **doublé d’un fichier tournant** `filesDir/logs/onfaa.log` (256 Ko, copie `.1`, relecture des 200 dernières lignes au démarrage). Écriture sur un thread dédié ; chaque message est assaini à l’écriture puis à l’export (UUID, liens, valeurs base64). Filtres par niveau, recherche texte, copie, export via `CreateDocument`, effacement confirmé.
 - **Statistiques** : durée de connexion (horloge réelle depuis `sinceEpochMs`), octets/débits `android.net.TrafficStats` de l’UID applicatif, état du tunnel, profil actif. L’UI indique explicitement que ce sont des compteurs UID (pas un compteur noyau du TUN) et affiche « indisponible » si la plateforme renvoie `UNSUPPORTED`.
 - **Limite inchangée** : validation native sur émulateur x86_64 ; appareil physique ARM64 à exécuter.
+
+## État Phase 5 — lot 1 (protocoles Trojan, Shadowsocks, SOCKS5)
+
+- **Moteur inchangé** : XTLS/Xray-core v26.11.9 via libXray v26.11.9 ; les nouveaux protocoles passent par le même chemin `convertShareLinksToXrayJson` → `XrayConfigBuilder` → `testXray` → `runXray`.
+- **Modèle** : `TunnelProtocol` = VLESS, VMESS, TROJAN, SHADOWSOCKS, SOCKS ; le nom est stocké dans Room (aucune migration), l’outbound complet reste chiffré AES-256-GCM.
+- **Validation par protocole** : UUID (VLESS/VMess), mot de passe (Trojan), méthode + mot de passe (Shadowsocks), aucun identifiant (SOCKS5) ; `settings.servers[0]` accepté s’il n’y a qu’une entrée.
+- **Preuves** : E2E `44019183061` — tunnels réels VLESS, VMess, Trojan (TLS auto-signé épinglé via `pcs`) et Shadowsocks (`aes-256-gcm`), `ACCESS_LOG_PER_PROTOCOL_OK vless=3 vmess=3 trojan=3 shadowsocks=9`. SOCKS5 : conversion et `testXray` réels, sans tunnel E2E. Détail : `docs/PHASE_5_PROTOCOLS_REPORT.md`.
 
 ## Vue d’ensemble
 
@@ -64,7 +71,7 @@ Application Android native en **Kotlin**, structurée autour de :
 
 ### 2. Moteur Xray
 
-- **XTLS/Xray-core officiel** : cœur de traitement des protocoles (VLESS, VMess) et de la logique proxy/tunnel.
+- **XTLS/Xray-core officiel** : cœur de traitement des protocoles (VLESS, VMess, Trojan, Shadowsocks, SOCKS5) et de la logique proxy/tunnel.
 - **libXray** : couche de liaison utilisée par l’application Android pour démarrer/arrêter/configurer le cœur (API exacte à confirmer ; **aucune signature inventée**).
 - **Contrainte** : pas de substitution par sing-box ou autre moteur.
 
@@ -97,7 +104,7 @@ Application Android native en **Kotlin**, structurée autour de :
 
 ## Décisions prises (Phases 1–4)
 
-- Import : liens `vless://`/`vmess://`, outbound unique ou configuration Xray JSON, presse-papiers, fichier ; validation obligatoire par `testXray`.
+- Import : liens `vless://`/`vmess://`/`trojan://`/`ss://`/`socks://`, outbound unique ou configuration Xray JSON, presse-papiers, fichier ; validation obligatoire par `testXray`.
 - Intégration libXray : AAR officiel épinglé, résolu par réflexion (`libXray.LibXray#invoke`), un seul runtime Go.
 - Statistiques : `android.net.TrafficStats` de l’UID applicatif, présentées comme telles (« pas un compteur noyau du TUN »).
 - Modèle Room v2 et migration `1 → 2` testée ; données sensibles chiffrées, sélection en DataStore.

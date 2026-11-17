@@ -80,6 +80,29 @@ Ce plan définit les catégories de tests nécessaires au fil des phases. Les ou
 
 **Validation** : Android CI [#44011899010](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44011899010) `success` (commit `230008c`, 23/23 unitaires) ; E2E [#44011899095](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44011899095) `success` — **27/27 instrumentés** (0 échec, 0 ignoré, 45,579 s), `vless=3 vmess=3`. Détail : `docs/PHASE_4_REPORT.md` §9.
 
+### Phase 5 — lot 1 : protocoles Trojan, Shadowsocks, SOCKS5 (livré)
+
+**Unitaires JVM (`:app:testDebugUnitTest`)** — **27** au total :
+- `ConfigImporterJsonTest` (12) : cas Phase 4 (8) + Trojan sans mot de passe, Shadowsocks sans méthode, Shadowsocks sans mot de passe, plusieurs `servers` dans une sortie ; le cas « protocole non supporté » utilise désormais `hysteria2` (refusé car inexécutable par Xray-core).
+- `ConfigImporterValidationTest` : le schéma refusé est `hysteria2://` (`ss://` étant désormais supporté).
+- Autres tests inchangés (assainissement, journaux, modèle).
+
+**Instrumentés réels (AAR officiel requis, émulateur x86_64 API 35)** — **34** au total :
+- `ProtocolImportInstrumentedTest` (5) : conversion réelle d’un lien `trojan://` (TLS), d’un lien `ss://` (SIP002 base64) et d’un lien `socks://` (userinfo base64) puis `testXray` ; import d’un JSON Shadowsocks `settings.servers[0]` ; import d’un JSON SOCKS5 sans authentification.
+- Tests Phase 2 à 4 conservés : 27 ; plus 2 scénarios E2E ajoutés (Trojan, Shadowsocks).
+
+**E2E réels** — `VpnTunnelE2ETest` **6/6** :
+- scénarios VLESS et VMess conservés ;
+- **Trojan** : inbound TLS `127.0.0.1:18445`, certificat auto-signé `CN=onfaa.test` épinglé par le lien (`?security=tls&sni=onfaa.test&pcs=<sha256 hex>`) car libXray force TLS et Xray 26 refuse `allowInsecure` ;
+- **Shadowsocks** : inbound `127.0.0.1:18446`, `aes-256-gcm`, lien `ss://base64(method:password)@hôte:port` ;
+- chaque scénario rejoue le cycle complet : échec direct, `Connected` après sonde HTTP réelle, DNS `onfaa.test` → `192.0.2.10`, HTTP 200 + token par IP et par nom, arrêt propre, échec direct à nouveau.
+
+**Portes de preuve** : XML `VpnTunnelE2ETest` avec `--min-tests 6` ; journal d’accès avec `vless-in`, `vmess-in`, `trojan-in` et `ss-in` → `token-redirect` ; absence de `target blocked by a finalrule`.
+
+**Validation** : Android CI [#44019183046](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44019183046) `success` (commit `5e2f0d4`, 27 tests unitaires) ; E2E [#44019183061](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44019183061) `success` — 30 étapes, **34/34 instrumentés** (0 échec, 0 ignoré, 61,351 s), `ACCESS_LOG_PER_PROTOCOL_OK vless=3 vmess=3 trojan=3 shadowsocks=9`. Détail : `docs/PHASE_5_PROTOCOLS_REPORT.md`.
+
+**Limites** : SOCKS5 sans tunnel E2E (pas de serveur SOCKS5 dans la fixture) ; Trojan prouvé avec certificat épinglé, pas avec une chaîne publique ; Shadowsocks 2022 non revendiqué.
+
 ### Phase 5 — Interface complète
 - Tests UI/instrumentation (navigation, états connexion, erreurs).
 - Vérification de l’application des 8 thèmes sur les 5 écrans.

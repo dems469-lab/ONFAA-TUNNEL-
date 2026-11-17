@@ -9,7 +9,7 @@
 ## Données sensibles (à ne jamais commiter)
 
 - Tokens d’accès (GitHub, CI, services tiers), mots de passe, clés privées, certificats.
-- UUID, identifiants, clés et paramètres secrets contenus dans les configurations VLESS/VMess personnelles.
+- UUID, mots de passe (Trojan, Shadowsocks, SOCKS5), identifiants, clés et paramètres secrets contenus dans les configurations personnelles (VLESS, VMess, Trojan, Shadowsocks, SOCKS5).
 - Fichiers de configuration réels des utilisateurs, captures contenant des secrets, exports de logs non assainis.
 - Fichiers keystore/JKS, `.env` contenant des secrets, tout matériel de signature.
 

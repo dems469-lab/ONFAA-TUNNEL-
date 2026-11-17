@@ -69,13 +69,24 @@ Ce document consigne les décisions prises, les hypothèses de travail et les ch
 | 2026-11-17 | Portes de preuve CI durcies : échec si `target blocked by a finalrule` dans le journal serveur, ≥1 ligne d’accès par protocole, 4 tests E2E exigés | Un journal d’accès peut prouver la destination **sans** prouver la réponse HTTP ; ne jamais déclarer un tunnel réussi sur une sonde expirée |
 | 2026-11-17 | Validation Phase 3 prononcée sur le run `44004893595` (commit `5f51831`) : 21/21 instrumentés, VLESS+VMess, DNS, arrêt propre | Preuves réelles uniquement. **Non revendiqué** : appareil physique ARM64 et changement d’IP publique (protocoles manuels documentés) |
 
+## Décisions validées (Phase 5 — lot 1 : protocoles)
+
+| Date | Décision | Raison / portée |
+| --- | --- | --- |
+| 2026-11-17 | Trojan, Shadowsocks et SOCKS5 passent par le **même** moteur XTLS/Xray-core/libXray ; aucun ajout de sing-box ni de second runtime | Prouvé par E2E réel pour Trojan et Shadowsocks ; SOCKS5 converti et validé par `testXray`. Hysteria 2 et SSH restent exclus (moteurs distincts) |
+| 2026-11-17 | `socks://` est supporté comme lien (et pas seulement en JSON) | `share/parse_share.go` de libXray v26.11.9 convertit `socks://` (userinfo base64 `utilisateur:motdepasse`) ; l’hypothèse « JSON-only » du plan de parité était erronée |
+| 2026-11-17 | Fixture Trojan : TLS avec certificat auto-signé `CN=onfaa.test`, épinglé par `pcs=<sha256 hex>` | libXray force `security=tls` pour `trojan://` ; Xray 26 a **supprimé** `allowInsecure` (`PrintRemovedFeatureError`). `pinnedPeerCertSha256` est le mécanisme officiel et fonctionne avec un certificat auto-signé |
+| 2026-11-17 | Aucune migration Room pour les nouveaux protocoles | `TunnelProtocol` est persisté par son nom (`String`) et relu par `valueOf` ; le schéma v2 est inchangé et les profils VLESS/VMess existants restent valides |
+| 2026-11-17 | SOCKS5, Shadowsocks 2022 et chaîne TLS publique de Trojan **non revendiqués** | SOCKS5 : pas de serveur SOCKS5 dans la fixture, donc conversion + `testXray` seulement ; Shadowsocks : preuve AEAD `aes-256-gcm` ; Trojan : preuve par certificat épinglé. Ne jamais transformer une validation de configuration en preuve de tunnel |
+| 2026-11-17 | Validation lot 1 prononcée sur Android CI `44019183046` et E2E `44019183061` (commit `5e2f0d4`) | 27 tests unitaires verts, 34/34 instrumentés, `ACCESS_LOG_PER_PROTOCOL_OK vless=3 vmess=3 trojan=3 shadowsocks=9`, aucun blackhole serveur |
+
 ## Choix techniques à confirmer / à compléter
 
 | Sujet | Questions ouvertes | Phase cible |
 | --- | --- | --- |
 | **Stockage de l’AAR** | Choix retenu : build from source en CI, AAR non commité (gitignore), injection vérifiée dans `app/libs` | Phase 2 (fait) / 9 |
 | **Exécution arm** | Valider `xrayVersion`/`invoke`/tunnel sur appareil physique `arm64-v8a` (émulateur x86_64 seulement en CI) — **en attente**, protocole dans `docs/PHASE_3_REPORT.md` | Phase 3 |
-| **Formats d’import** | Liens `vless://` et `vmess://` URL implémentés et validés en Phase 3 ; restent JSON, QR, presse-papiers et persistance | Phase 4 |
+| **Formats d’import** | Liens `vless://`, `vmess://`, `trojan://`, `ss://`, `socks://`, presse-papiers, fichier et JSON Xray implémentés ; restent QR et abonnements HTTPS | Phases 5 (lot 2) |
 | **Modèle de données** | Schéma Room (profils, groupes, journaux), persistance chiffrée, stratégie de migration | Phases 4+ |
 | **Statistiques** | Aucune source réelle branchée : ne pas afficher de compteurs tant que l’API moteur n’est pas intégrée | Phases 6+ |
 | **DNS/Routage** | Base réelle Phase 3 : DNS via tunnel, privé direct, reste proxy ; options utilisateur à exposer | Phases 6–7 |

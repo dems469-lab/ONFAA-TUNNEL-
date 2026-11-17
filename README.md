@@ -2,16 +2,16 @@
 
 ONFAA TUNNEL est un client VPN Android natif visant à fournir une connexion VPN réelle basée sur le cœur officiel **XTLS/Xray-core** (upstream : https://github.com/XTLS/Xray-core) via **libXray** (après vérification de compatibilité/API officielle).
 
-> **État actuel : Phase 4 livrée — tunnel réel, profils persistés, import étendu.**  
-> Le tunnel VPN réel VLESS/VMess fonctionne de bout en bout en CI (Phase 3). La Phase 4 ajoute la persistance Room v2 des profils (outbound chiffré AES-256-GCM via Android Keystore), la sélection dans DataStore, l’import par lien, presse-papiers, fichier et JSON Xray validé par le moteur, un cycle de vie VPN à 9 états avec surveillance et reprise bornée, des journaux bornés/assainis/exportables et des statistiques mesurées. Code : commit `230008c` ; CI :
-> [Android CI #44011899010](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44011899010) (**succès**),
-> [E2E #44011899095](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44011899095).
-> Rapport complet : [`docs/PHASE_4_REPORT.md`](docs/PHASE_4_REPORT.md). Deux limites restent **non revendiquées** : appareil physique ARM64 et changement d’IP publique.
+> **État actuel : Phase 5 — lot 1 livré (Trojan, Shadowsocks, SOCKS5) sur le tunnel réel.**  
+> Le tunnel VPN réel fonctionne de bout en bout en CI pour **VLESS, VMess, Trojan et Shadowsocks** avec le même moteur officiel XTLS/Xray-core v26.11.9 ; l’import accepte aussi les liens/JSON **SOCKS5** (conversion et validation moteur réelles, sans tunnel E2E revendiqué). Les profils restent persistés en Room v2 (outbound chiffré AES-256-GCM via Android Keystore), avec sélection DataStore, import lien/presse-papiers/fichier/JSON, cycle de vie à 9 états, journaux assainis et statistiques mesurées. Code : commit `5e2f0d4` ; CI :
+> [Android CI #44019183046](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44019183046) (**succès**, 27 tests unitaires),
+> [E2E #44019183061](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44019183061) (**succès**, 34/34 instrumentés, `vless=3 vmess=3 trojan=3 shadowsocks=9`).
+> Rapports : [`docs/PHASE_5_PROTOCOLS_REPORT.md`](docs/PHASE_5_PROTOCOLS_REPORT.md) et [`docs/PHASE_4_REPORT.md`](docs/PHASE_4_REPORT.md). Limites **non revendiquées** : appareil physique ARM64, changement d’IP publique, tunnel SOCKS5 de bout en bout.
 
 ## Objectifs
 
 - Connexion VPN réelle sur Android (pas de simulation).
-- Support des protocoles **VLESS** et **VMess**.
+- Support des protocoles **VLESS**, **VMess**, **Trojan**, **Shadowsocks** et **SOCKS5** (moteur Xray-core).
 - Importation et gestion de configurations personnelles.
 - Gestion des serveurs et sélection active.
 - Statistiques réseau réelles (débit, trafic, latence selon capacités).
@@ -40,7 +40,8 @@ Versions épinglées et choix documentés dans [`docs/DECISIONS.md`](docs/DECISI
 - Preuve de concept Android libXray (Phase 2B) : [`docs/LIBXRAY_ANDROID_POC.md`](docs/LIBXRAY_ANDROID_POC.md)
 - Rapport Phase 3 (tunnel réel) : [`docs/PHASE_3_REPORT.md`](docs/PHASE_3_REPORT.md)
 - Rapport Phase 4 (persistance, import, cycle de vie) : [`docs/PHASE_4_REPORT.md`](docs/PHASE_4_REPORT.md)
-- Plan de parité inspiré de SNI Tunnel (proposition) : [`docs/PHASE_5_PARITY_PLAN.md`](docs/PHASE_5_PARITY_PLAN.md)
+- Plan de parité inspiré de SNI Tunnel : [`docs/PHASE_5_PARITY_PLAN.md`](docs/PHASE_5_PARITY_PLAN.md)
+- Rapport Phase 5 — lot 1 (protocoles) : [`docs/PHASE_5_PROTOCOLS_REPORT.md`](docs/PHASE_5_PROTOCOLS_REPORT.md)
 
 ## Structure du projet
 

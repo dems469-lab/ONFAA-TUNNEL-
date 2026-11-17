@@ -66,7 +66,7 @@ Workflow : `.github/workflows/libxray-poc.yml` (déclencheurs : `push` sur `main
 Étapes principales :
 1. Build de l’AAR officiel libXray depuis le commit épinglé, inspection (SHA-256, ABIs, ELF, 16 KiB, `javap`) puis intégration `app/libs/libXray.aar` (non commité).
 2. Build du binaire **Xray-core officiel** depuis le commit épinglé (`v26.11.9`, `676eaf66…`) sur le runner, vérification du commit, `xray version`, validation de la configuration serveur (`xray -test`).
-3. Démarrage de la fixture E2E : inbounds VLESS/VMess loopback, sortie `freedom` (avec `finalRules` `allow` pour la cible de `redirect` `127.0.0.1:18080`, sinon Xray 26.x la blackhole), serveur token HTTP sur `192.0.2.10:18080` (alias loopback TEST-NET), DNS `127.0.0.1:15353` en UDP et TCP pour `onfaa.test` ; le tunnel utilise `tcp://10.0.2.2:15353` (forwarding UDP de l’alias hôte non garanti).
+3. Démarrage de la fixture E2E : inbounds loopback VLESS (18443), VMess (18444), Trojan (18445, TLS avec certificat auto-signé `CN=onfaa.test` dont le SHA-256 hex est épinglé par le lien via `pcs`) et Shadowsocks (18446, `aes-256-gcm`), sortie `freedom` (avec `finalRules` `allow` pour la cible de `redirect` `127.0.0.1:18080`, sinon Xray 26.x la blackhole), serveur token HTTP sur `192.0.2.10:18080` (alias loopback TEST-NET), DNS `127.0.0.1:15353` en UDP et TCP pour `onfaa.test` ; le tunnel utilise `tcp://10.0.2.2:15353` (forwarding UDP de l’alias hôte non garanti).
 4. Tests unitaires `:app:testDebugUnitTest`, APK debug, APK androidTest.
 5. Tests instrumentés réels sur émulateur x86_64 API 35 avec arguments :
    ```bash
@@ -76,23 +76,29 @@ Workflow : `.github/workflows/libxray-poc.yml` (déclencheurs : `push` sur `main
      -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.host="10.0.2.2" \
      -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.vlessPort="18443" \
      -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.vmessPort="18444" \
+     -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.trojanPort="18445" \
+     -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.trojanPassword="<mot-de-passe-de-test>" \
+     -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.trojanPcs="<sha256-hex-du-certificat>" \
+     -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.ssPort="18446" \
+     -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.ssMethod="aes-256-gcm" \
+     -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.ssPassword="<mot-de-passe-de-test>" \
      -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.dns="tcp://10.0.2.2:15353" \
      -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.probeUrl="http://onfaa.test:18080/token" \
      -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.token="<token-de-test>"
    ```
-6. Vérification des preuves : XML `VpnTunnelE2ETest` (**4 tests**, 0 échec/erreur/ignoré), journal d’accès Xray contenant `192.0.2.10:18080` **et au moins une ligne par protocole**, absence de `target blocked by a finalrule` dans le journal serveur, collecte des journaux, arrêt des serveurs, suppression de l’alias loopback.
+6. Vérification des preuves : XML `VpnTunnelE2ETest` (**6 tests**, 0 échec/erreur/ignoré), journal d’accès Xray contenant `192.0.2.10:18080` **et au moins une ligne par protocole** (`vless-in`, `vmess-in`, `trojan-in`, `ss-in`), absence de `target blocked by a finalrule` dans le journal serveur, collecte des journaux, arrêt des serveurs, suppression de l’alias loopback.
 7. Publication des artefacts : `poc-report` (AAR, preuves, rapports, APK de test) et APK debug fonctionnel.
 
 **Sécurité des builds** : le trafic HTTP en clair n’est autorisé que dans le variant **debug** (`app/src/debug/res/xml/network_security_config.xml`) pour la fixture CI ; le variant release garde `cleartextTrafficPermitted=false`.
 
-**Résultats** : run [#44004893595](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44004893595) `success` (commit `5f51831`, 25/25 étapes) — 11/11 tests unitaires, 21/21 instrumentés, E2E VLESS et VMess, DNS et journal d’accès par protocole. Détail : `docs/PHASE_3_REPORT.md` §9. Les limites ARM64 physique et IP publique restent non revendiquées.
+**Résultats** : run historique Phase 3 [#44004893595](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44004893595) `success` (commit `5f51831`, 25/25 étapes, 21/21 instrumentés, E2E VLESS/VMess — `docs/PHASE_3_REPORT.md` §9). Run actuel (lot 1 protocoles) : [#44019183061](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44019183061) `success` (commit `5e2f0d4`, 30 étapes, 34/34 instrumentés, `vless=3 vmess=3 trojan=3 shadowsocks=9` — `docs/PHASE_5_PROTOCOLS_REPORT.md`). Les limites ARM64 physique et IP publique restent non revendiquées.
 
 ## Phase 4 — persistance, import étendu, cycle de vie (CI verte)
 
 - **Aucun changement de chaîne de build** : Room 2.6.1, DataStore 1.1.1 et l’AAR libXray épinglé restent les seules dépendances ; `org.json:json:20240303` est ajouté en `testImplementation` uniquement (parsing JSON des tests unitaires JVM).
 - **Version** : `versionCode 4`, `versionName 0.4.0-phase4`.
 - **Workflows** : `.github/workflows/android.yml` (compilation, tests unitaires, `assembleDebug`, `assembleDebugAndroidTest`, APK) et `.github/workflows/libxray-poc.yml` (E2E réel + tous les instrumentés).
-- **Portes E2E inchangées** : `E2E_XML_VALIDATED`, `ACCESS_LOG_PER_PROTOCOL_OK`, `--suite VpnTunnelE2ETest --min-tests 4` — un test non exécuté échoue.
+- **Portes E2E** : `E2E_XML_VALIDATED`, `ACCESS_LOG_PROVES_TUNNEL_DESTINATION`, `ACCESS_LOG_PER_PROTOCOL_OK`, `--suite VpnTunnelE2ETest --min-tests 6` — un test non exécuté échoue.
 - **Résultats** : Android CI [#44011899010](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44011899010) `success` (commit `230008c`) — 23/23 unitaires, APK debug et APK de tests ; E2E [#44011899095](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44011899095) `success` — 27/27 instrumentés. Artefacts `onfaa-tunnel-debug-apk` et `libxray-poc-report`. Détail : `docs/PHASE_4_REPORT.md`.
 
 ## Secrets et signature

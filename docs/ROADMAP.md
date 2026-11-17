@@ -32,6 +32,7 @@ La roadmap est organisée en dix phases. Chaque phase doit être documentée, va
 ## Phase 5 — Interface complète
 - **Objectif :** implémenter l’UI complète selon la spécification.
 - **Livrables attendus :** cinq écrans fonctionnels, navigation, application des huit thèmes, cohérence avec les états réels.
+- **État :** UI livrée (4 onglets, 7 palettes × 3 modes, sous-écrans ; voir `docs/design/DESIGN_SPEC.md`), **plus le lot 1 du plan de parité** (`docs/PHASE_5_PARITY_PLAN.md`) : import et exécution réels de **Trojan, Shadowsocks et SOCKS5** avec le même moteur Xray. Android CI [#44019183046](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44019183046) et E2E [#44019183061](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44019183061) `success` (34/34 instrumentés, `vless=3 vmess=3 trojan=3 shadowsocks=9`) ; rapport `docs/PHASE_5_PROTOCOLS_REPORT.md`. Lots 2 à 5 (QR/abonnements, transports, automatisation, édition manuelle) restent à faire.
 
 ## Phase 6 — Réseau et diagnostics
 - **Objectif :** exposer statistiques réseau réelles, DNS, routage, journaux et diagnostics.

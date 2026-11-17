@@ -2,8 +2,9 @@
 
 ## État de phase
 
-- **Phase actuelle :** 4 — Persistance réelle, import étendu, cycle de vie durci — **livrée, compilée et testée en CI (émulateur x86_64)**
-- **État :** les profils sont persistés dans Room v2 (outbound chiffré AES-256-GCM via Android Keystore), la sélection dans DataStore, l’import couvre liens, presse-papiers, fichiers et JSON Xray, le service expose 9 états avec surveillance et reprise bornée, les journaux sont bornés/assainis/exportables et les statistiques sont mesurées. Le run Android CI [#44011899010](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44011899010) (commit `230008c`) est **vert** (compilation, 23/23 unitaires, APK debug + APK de tests). Le run E2E [#44011899095](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44011899095) est **vert** : 30 étapes, **27/27 tests instrumentés** (0 échec, 0 ignoré), E2E VLESS et VMess avec sonde réelle, `ACCESS_LOG_PER_PROTOCOL_OK vless=3 vmess=3`. Détail : `docs/PHASE_4_REPORT.md` §9.
+- **Phase actuelle :** 5 — lot 1 du plan de parité (protocoles) — **livré, compilé et testé en CI (émulateur x86_64)**
+- **État :** l’application importe et exécute désormais **VLESS, VMess, Trojan, Shadowsocks et SOCKS5** avec le même moteur XTLS/Xray-core v26.11.9 (libXray v26.11.9), sans sing-box ni simulation. Import par lien (`vless://`, `vmess://`, `trojan://`, `ss://`, `socks://`) ou JSON Xray, validation structurelle puis `testXray`, profils chiffrés AES-256-GCM comme en Phase 4 (aucune migration Room nécessaire). Le run Android CI [#44019183046](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44019183046) (commit `5e2f0d4`) est **vert** : 27 tests unitaires, APK debug + APK de tests. Le run E2E [#44019183061](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44019183061) est **vert** : 30 étapes, **34/34 tests instrumentés** (0 échec, 0 ignoré), `VpnTunnelE2ETest` 6/6 avec tunnels réels VLESS, VMess, **Trojan** et **Shadowsocks**, `ACCESS_LOG_PER_PROTOCOL_OK vless=3 vmess=3 trojan=3 shadowsocks=9`. Détail : `docs/PHASE_5_PROTOCOLS_REPORT.md`.
+- **Non revendiqué (lot 1) :** tunnel SOCKS5 de bout en bout (conversion + validation moteur seulement), chaîne TLS publique pour Trojan (preuve par certificat auto-signé épinglé), Shadowsocks 2022 (preuve AEAD `aes-256-gcm` uniquement), Hysteria 2 (inexécutable par Xray-core).
 - **Phase 3 :** terminée et validée en CI (tunnel réel VLESS/VMess, 21/21 instrumentés, run [#44004893595](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44004893595)) ; preuves conservées ci-dessous.
 - **Phase 2B :** terminée et validée (AAR officiel, API native, 6/6 tests instrumentés) ; preuves conservées ci-dessous.
 
@@ -11,6 +12,8 @@
 
 - **Dépôt :** https://github.com/dems469-lab/ONFAA-TUNNEL-
 - **Branche principale :** `main`
+- **Commit Phase 5 (lot 1 protocoles) :** `5e2f0d4`
+- **Runs CI Phase 5 (lot 1) :** [Android CI #44019183046](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44019183046) — `success`, 27 tests unitaires ; [E2E #44019183061](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44019183061) — `success`, 34/34 instrumentés, `vless=3 vmess=3 trojan=3 shadowsocks=9`
 - **Commit Phase 4 (code) :** `230008c`
 - **Runs CI Phase 4 :** [Android CI #44011899010](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44011899010) — `success` ; [libXray Android build and real VPN E2E #44011899095](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44011899095) — `success`, 27/27 instrumentés
 - **Commit Phase 3 (code) :** `5f518313082fc095eeb118553b6fd969318cddfd`
@@ -18,6 +21,22 @@
 - **Run de confirmation (CI allégée, commit `aef515e`) :** [#44006718908](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44006718908) — `success`, 21/21 instrumentés, `vless=3 vmess=3`
 - **Dernier commit Phase 2B validé :** `f116442021b4e80508e3ef2448d21980f2207534`
 - **Run Phase 2B réussi :** [#43965698249](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/43965698249)
+
+## Implémentation Phase 5 — lot 1 (livrée)
+
+### Protocoles (même moteur Xray-core)
+
+- **VLESS, VMess, Trojan, Shadowsocks, SOCKS5** via libXray (`convertShareLinksToXrayJson`, `testXray`, `runXray`) ; aucun protocole exécuté hors du moteur officiel.
+- **Liens** : `vless://`, `vmess://`, `trojan://`, `ss://` (SIP002 base64), `socks://` (userinfo base64). **JSON Xray** : sortie `vless`, `vmess`, `trojan`, `shadowsocks`, `socks` ; `settings.servers[0]` accepté pour une entrée unique.
+- **Validation** : structure puis `testXray` ; identifiants vérifiés selon le protocole (UUID, mot de passe Trojan, méthode + mot de passe Shadowsocks, aucun pour SOCKS5).
+- **Sécurité inchangée** : l’outbound complet (UUID, mots de passe, clés) est chiffré AES-256-GCM (Android Keystore) à l’enregistrement ; jamais journalisé ; erreurs assainies. Aucune migration Room : l’énumération est stockée par son nom.
+
+### Tests et preuves
+
+- Unitaires : **27** (dont 4 nouveaux cas d’import : Trojan sans mot de passe, Shadowsocks sans méthode, sans mot de passe, plusieurs `servers`).
+- Instrumentés : **34** (dont `ProtocolImportInstrumentedTest` 5 : liens trojan/ss/socks réels, Shadowsocks `servers[]`, SOCKS5 sans authentification).
+- E2E : `VpnTunnelE2ETest` **6/6** avec tunnels réels VLESS, VMess, **Trojan** (TLS, certificat auto-signé épinglé par `pcs`) et **Shadowsocks** (`aes-256-gcm`) ; DNS et routage réels ; arrêt propre ; journal d’accès `vless=3 vmess=3 trojan=3 shadowsocks=9`.
+- Limites : SOCKS5 sans tunnel E2E ; pas de chaîne TLS publique pour Trojan ; Shadowsocks 2022 non revendiqué ; Hysteria 2 refusé (non exécutable par Xray-core). Détail : `docs/PHASE_5_PROTOCOLS_REPORT.md`.
 
 ## Implémentation Phase 4 (livrée)
 

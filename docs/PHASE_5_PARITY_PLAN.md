@@ -8,15 +8,15 @@
 
 ## 1. Matrice de parité
 
-| Fonction | SNI Tunnel | ONFAA (203929c) | Décision |
+| Fonction | SNI Tunnel | ONFAA (`5e2f0d4`) | Décision |
 | --- | --- | --- | --- |
 | VLESS / VMess | oui | oui, prouvé E2E | conservé |
-| Trojan | oui | non | **lot 1** |
-| Shadowsocks AEAD / 2022 | oui | non | **lot 1** |
-| SOCKS5 | oui | non | **lot 1** |
+| Trojan | oui | oui (lot 1, E2E TLS) | livré |
+| Shadowsocks AEAD / 2022 | oui | AEAD prouvé E2E ; 2022 accepté par le moteur, non prouvé | livré (AEAD) |
+| SOCKS5 | oui | import + validation moteur (pas d’E2E) | livré (partiel) |
 | Hysteria 2 (QUIC) | oui | non | **exclu** (moteur distinct) |
 | SSH (mot de passe/clé) | oui | non | **exclu** (moteur distinct) |
-| Import liens | vless/vmess/trojan/ss/hy2/sni-ssh | vless/vmess | lot 1 puis 2 |
+| Import liens | vless/vmess/trojan/ss/hy2/sni-ssh | vless/vmess/trojan/ss/socks | lot 2 (QR/abonnements) |
 | Import QR (caméra) | oui | non | **lot 2** |
 | Abonnements HTTPS + quota/expiration | oui | non | **lot 2** |
 | Liste groupée par abonnement | oui | non | lot 2 |
@@ -41,6 +41,14 @@
 
 ### Lot 1 — Protocoles Xray : Trojan, Shadowsocks, SOCKS5
 
+**Statut : livré et validé en CI (commit `5e2f0d4`).**
+Android CI [#44019183046](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44019183046) `success` (27 tests unitaires) ;
+E2E [#44019183061](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44019183061) `success` (34/34 instrumentés,
+`ACCESS_LOG_PER_PROTOCOL_OK vless=3 vmess=3 trojan=3 shadowsocks=9`). Rapport : `docs/PHASE_5_PROTOCOLS_REPORT.md`.
+Écarts assumés par rapport au plan ci-dessous : `socks://` **est** finalement supporté
+(libXray le convertit) ; le certificat Trojan de la fixture est auto-signé et épinglé
+par `pcs` car Xray 26 a supprimé `allowInsecure` ; SOCKS5 n’a pas de tunnel E2E.
+
 Objectif : trois protocoles de plus, **dans le moteur officiel déjà épinglé**, sans
 toucher à l’intégration validée VLESS/VMess.
 
@@ -49,8 +57,8 @@ Changements prévus :
 - `domain/model/ServerConfig.kt` : `TunnelProtocol` + `TROJAN`, `SHADOWSOCKS`,
   `SOCKS` ; libellé d’affichage.
 - `core/xray/ConfigImporter.kt` :
-  - liens acceptés `trojan://` et `ss://` (conversion libXray, puis validation
-    moteur) ; `socks://` reste JSON-only (pas de format de lien standard) ;
+  - liens acceptés `trojan://`, `ss://` et `socks://` (conversion libXray, puis
+    validation moteur) ;
   - validation des identifiants **par protocole** : `id` (VLESS/VMess),
     `password` (Trojan), `method` + `password` (Shadowsocks), authentification
     optionnelle (SOCKS) ;

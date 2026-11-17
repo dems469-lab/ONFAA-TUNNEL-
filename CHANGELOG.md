@@ -6,6 +6,15 @@ Le format s’inspire de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/
 
 ## [Unreleased]
 
+### Phase 5 — lot 1 : Trojan, Shadowsocks et SOCKS5 via le moteur Xray (livré, CI verte)
+- **Protocoles** : `TunnelProtocol` gagne `TROJAN`, `SHADOWSOCKS` et `SOCKS` (libellés UI `Trojan`, `Shadowsocks`, `SOCKS5`) ; le moteur reste XTLS/Xray-core v26.11.9 via libXray v26.11.9, aucun ajout de sing-box ni de faux moteur. Aucune migration Room : le nom de l’énumération est stocké tel quel.
+- **Import** : liens `trojan://`, `ss://` (SIP002 base64) et `socks://` (userinfo base64) convertis par `convertShareLinksToXrayJson`, plus les sorties JSON `trojan`, `shadowsocks` et `socks` (forme plate ou `settings.servers[0]`, une seule entrée). Validation adaptée au protocole : UUID (VLESS/VMess), mot de passe (Trojan), méthode + mot de passe (Shadowsocks), aucun identifiant requis (SOCKS5). Messages d’erreur précis et assainis.
+- **UI** : libellés de protocole dans Configs/Accueil/Stats, aide d’import et libellé du champ mis à jour.
+- **Tests** : **27 tests unitaires** (dont 4 nouveaux cas d’import) ; 5 tests instrumentés de conversion/validation réelle (`ProtocolImportInstrumentedTest` : liens trojan/ss/socks, Shadowsocks `servers[]`, SOCKS5 sans authentification) ; 2 scénarios E2E réels (Trojan, Shadowsocks) et garde-fou `--min-tests 6`.
+- **Fixture E2E** : inbounds `trojan-in` (port 18445, **TLS** avec certificat auto-signé épinglé par `pcs`, car libXray force TLS et Xray 26 a supprimé `allowInsecure`) et `ss-in` (port 18446, `aes-256-gcm`) ; journal d’accès vérifié par protocole.
+- **Validation** : [Android CI #44019183046](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44019183046) `success` (commit `5e2f0d4`, 27 tests unitaires, APK debug + APK de tests) ; [E2E #44019183061](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44019183061) `success` — 30 étapes, **34/34 instrumentés**, `VpnTunnelE2ETest` 6/6, `ACCESS_LOG_PER_PROTOCOL_OK vless=3 vmess=3 trojan=3 shadowsocks=9`.
+- **Limites** : SOCKS5 prouvé en conversion + `testXray` mais sans tunnel E2E (pas de serveur SOCKS5 dans la fixture) ; Trojan prouvé avec certificat auto-signé épinglé (pas de chaîne publique) ; Shadowsocks prouvé en AEAD `aes-256-gcm` seulement ; Hysteria 2 reste refusé (non exécutable par Xray-core). Détail : `docs/PHASE_5_PROTOCOLS_REPORT.md`.
+
 ### Phase 4 — persistance réelle, import étendu, cycle de vie durci (livrée, CI verte)
 - **Persistance Room v2** : table `server_configs` réellement écrite (`ProfileEntity`, `ProfileDao`, `OnfaaDatabase` v2) ; ajout, renommage, suppression, favoris et sélection ; les profils survivent au redémarrage de l’application et de l’appareil.
 - **Migration `1 → 2`** : table recréée explicitement puis recopiée (pas d’`ALTER TABLE ... DEFAULT`) ; lignes v1 conservées, marquées `incomplete` car la v1 ne stockait aucune donnée d’authentification ; connexion refusée avec message tant que le lien n’est pas réimporté. Test instrumenté avec une base v1 réelle.
