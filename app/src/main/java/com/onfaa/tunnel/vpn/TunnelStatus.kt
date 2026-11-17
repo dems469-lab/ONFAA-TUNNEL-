@@ -23,12 +23,19 @@ sealed interface TunnelState {
     data class Error(val message: String) : TunnelState
 }
 
+enum class LogSeverity { INFO, WARNING, ERROR, SUCCESS }
+
 data class TunnelEvent(
     val epochMs: Long,
-    val message: String
+    val message: String,
+    val severity: LogSeverity = LogSeverity.INFO
 ) {
     fun timeLabel(): String =
         SimpleDateFormat("HH:mm:ss", Locale.US).format(Date(epochMs))
+
+    val isError: Boolean get() = severity == LogSeverity.ERROR
+    val isWarning: Boolean get() = severity == LogSeverity.WARNING
+    val isSuccess: Boolean get() = severity == LogSeverity.SUCCESS
 }
 
 /**
@@ -48,19 +55,51 @@ object TunnelStatusRepository {
     }
 
     @Synchronized
-    fun log(message: String) {
+    fun log(message: String, severity: LogSeverity? = null) {
         val safe = XrayErrorSanitizer.sanitize(message)
-        _events.value = (_events.value + TunnelEvent(System.currentTimeMillis(), safe)).takeLast(200)
+        _events.value = (
+            _events.value + TunnelEvent(
+                epochMs = System.currentTimeMillis(),
+                message = safe,
+                severity = severity ?: classify(safe)
+            )
+        ).takeLast(200)
     }
 
     @Synchronized
     fun error(message: String) {
         val safe = XrayErrorSanitizer.sanitize(message)
         _state.value = TunnelState.Error(safe)
-        log(safe)
+        log(safe, LogSeverity.ERROR)
     }
 
     fun clearEvents() {
         _events.value = emptyList()
+    }
+
+    /**
+     * Severity is inferred from the real message produced by the service; no
+     * event is fabricated. Explicit severity can be passed by callers.
+     */
+    private fun classify(message: String): LogSeverity {
+        val text = message.lowercase(Locale.ROOT)
+        return when {
+            listOf(
+                "erreur", "échec", "echec", "echou", "échou", "impossible",
+                "refus", "invalide", "non vérifiée", "non verifiee",
+                "indisponible", "révoqué", "revoque"
+            ).any { text.contains(it) } -> LogSeverity.ERROR
+
+            listOf("report", "avertissement", "warn", "retard").any { text.contains(it) } ->
+                LogSeverity.WARNING
+
+            listOf(
+                "valid", "démarr", "demarr", "connecté", "connecte", "vérifiée",
+                "verifiee", "réussi", "reussi", "succès", "succes", "créée",
+                "creee", "actif"
+            ).any { text.contains(it) } -> LogSeverity.SUCCESS
+
+            else -> LogSeverity.INFO
+        }
     }
 }
