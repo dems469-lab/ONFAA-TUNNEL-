@@ -13,8 +13,8 @@ android {
         applicationId = "com.onfaa.tunnel"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "0.3.0-phase3"
+        versionCode = 4
+        versionName = "0.4.0-phase4"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -84,6 +84,7 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.org.json)
 
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

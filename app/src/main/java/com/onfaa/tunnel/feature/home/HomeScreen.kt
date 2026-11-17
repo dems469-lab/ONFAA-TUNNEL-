@@ -52,12 +52,25 @@ fun HomeScreen() {
     }
 
     fun requestConnect() {
-        if (selected == null) {
+        val profile = selected
+        if (profile == null) {
             TunnelStatusRepository.error("Aucune configuration sélectionnée")
             return
         }
+        if (profile.incomplete) {
+            TunnelStatusRepository.error(
+                "Configuration incomplète : réimportez le lien de « ${profile.displayName} »"
+            )
+            return
+        }
         val consent = VpnService.prepare(context)
-        if (consent != null) permissionLauncher.launch(consent) else startTunnel(context)
+        if (consent != null) {
+            TunnelStatusRepository.set(TunnelState.AwaitingPermission)
+            TunnelStatusRepository.log("Autorisation VPN demandée à Android")
+            permissionLauncher.launch(consent)
+        } else {
+            startTunnel(context)
+        }
     }
 
     Column(
@@ -91,7 +104,7 @@ fun HomeScreen() {
         }
         Spacer(modifier = Modifier.height(24.dp))
         when (state) {
-            is TunnelState.Connected, is TunnelState.Disconnecting -> {
+            is TunnelState.Connected, is TunnelState.Reconnecting, is TunnelState.Disconnecting -> {
                 OutlinedButton(
                     onClick = { disconnectTunnel(context) },
                     enabled = state !is TunnelState.Disconnecting,
@@ -105,6 +118,9 @@ fun HomeScreen() {
                 Button(
                     onClick = { requestConnect() },
                     enabled = selected != null &&
+                        !selected.incomplete &&
+                        state !is TunnelState.AwaitingPermission &&
+                        state !is TunnelState.Preparing &&
                         state !is TunnelState.Connecting &&
                         state !is TunnelState.Verifying,
                     modifier = Modifier.fillMaxWidth()
@@ -118,6 +134,14 @@ fun HomeScreen() {
             Text(
                 text = "Importez une configuration VLESS ou VMess dans l'onglet Configurations.",
                 style = MaterialTheme.typography.bodySmall,
+                textAlign = TextAlign.Center
+            )
+        } else if (selected.incomplete) {
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = "Ce profil a été migré sans identifiant : réimportez son lien dans Configurations.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
                 textAlign = TextAlign.Center
             )
         }
@@ -139,9 +163,12 @@ private fun disconnectTunnel(context: Context) {
 
 private fun statusTitle(state: TunnelState): String = when (state) {
     TunnelState.Idle -> "Déconnecté"
+    TunnelState.AwaitingPermission -> "Autorisation demandée…"
+    TunnelState.Preparing -> "Préparation…"
     TunnelState.Connecting -> "Connexion en cours…"
     TunnelState.Verifying -> "Vérification de la connectivité…"
     is TunnelState.Connected -> "Connecté"
+    is TunnelState.Reconnecting -> "Reconnexion…"
     TunnelState.Disconnecting -> "Déconnexion…"
     is TunnelState.Error -> "Erreur"
 }
@@ -149,9 +176,13 @@ private fun statusTitle(state: TunnelState): String = when (state) {
 private fun statusDetail(state: TunnelState, selected: TunnelProfile?): String = when (state) {
     TunnelState.Idle -> selected?.let { "${it.protocol.name} — ${it.endpoint}" }
         ?: "Aucune connexion active."
+    TunnelState.AwaitingPermission -> "Android demande l'autorisation d'établir le VPN."
+    TunnelState.Preparing -> "Validation du profil et préparation de l'interface TUN."
     TunnelState.Connecting -> "Démarrage du moteur Xray et du TUN Android."
     TunnelState.Verifying -> "Le moteur est actif ; vérification réelle du trafic."
     is TunnelState.Connected -> "${state.profileName} — ${state.protocol.name}"
+    is TunnelState.Reconnecting ->
+        "Réseau perdu (tentative ${state.attempt}) : le tunnel sera revalidé dès le retour du réseau."
     TunnelState.Disconnecting -> "Arrêt du moteur et fermeture du TUN."
     is TunnelState.Error -> state.message
 }

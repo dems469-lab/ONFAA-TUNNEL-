@@ -70,6 +70,13 @@ class OnfaaTunnelVpnService : VpnService() {
         private const val PROBE_ATTEMPTS = 6
         private const val PROBE_RETRY_DELAY_MS = 3_000L
         private const val PROBE_TOTAL_TIMEOUT_MS = 40_000L
+
+        // After Connected, the tunnel is re-proven with a real request. A
+        // failure opens a bounded recovery window: the state is Reconnecting
+        // (never Connected) until a probe succeeds again.
+        private const val HEALTH_CHECK_INTERVAL_MS = 20_000L
+        private const val RECONNECT_DELAY_MS = 5_000L
+        private const val RECONNECT_TIMEOUT_MS = 90_000L
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -78,6 +85,9 @@ class OnfaaTunnelVpnService : VpnService() {
     private var tun: ParcelFileDescriptor? = null
     private var engineRunning = false
     private var trafficJob: Job? = null
+    private var healthJob: Job? = null
+
+    private var connectedSinceEpochMs: Long = 0L
 
     @Volatile
     private var destroyed = false
@@ -105,9 +115,17 @@ class OnfaaTunnelVpnService : VpnService() {
     }
 
     private suspend fun connect(intent: Intent) = lifecycle.withLock {
-        if (engineRunning) return@withLock
+        val currentState = TunnelStatusRepository.state.value
+        if (engineRunning ||
+            currentState is TunnelState.Connecting ||
+            currentState is TunnelState.Verifying ||
+            currentState is TunnelState.Connected ||
+            currentState is TunnelState.Reconnecting
+        ) {
+            TunnelStatusRepository.log("Connexion déjà active — demande ignorée", LogSeverity.WARNING)
+            return@withLock
+        }
 
-        TunnelStatusRepository.set(TunnelState.Connecting)
         TunnelStatusRepository.log("Connexion demandée")
 
         try {
@@ -117,6 +135,8 @@ class OnfaaTunnelVpnService : VpnService() {
                 throw IllegalStateException("Permission VPN refusée par Android")
             }
 
+            TunnelStatusRepository.set(TunnelState.Preparing)
+            updateNotification("Préparation du tunnel…")
             val profile = resolveProfile(intent)
             TunnelStatusRepository.log("Configuration ${profile.protocol.name} validée")
 
@@ -151,6 +171,8 @@ class OnfaaTunnelVpnService : VpnService() {
             val descriptor = buildTun() ?: throw IllegalStateException("Permission VPN refusée par Android")
             tun = descriptor
             Log.i(TAG, "TUN established")
+            TunnelStatusRepository.set(TunnelState.Connecting)
+            TunnelStatusRepository.log("TUN établi, démarrage du moteur Xray")
 
             val protectFailures = AtomicInteger(0)
             val protectSuccesses = AtomicInteger(0)
@@ -207,15 +229,17 @@ class OnfaaTunnelVpnService : VpnService() {
                 teardownEngine()
                 return@withLock
             }
+            connectedSinceEpochMs = System.currentTimeMillis()
             TunnelStatusRepository.set(
                 TunnelState.Connected(
                     profileName = profile.displayName,
                     protocol = profile.protocol,
-                    sinceEpochMs = System.currentTimeMillis()
+                    sinceEpochMs = connectedSinceEpochMs
                 )
             )
             TunnelStatusRepository.log("Connecté avec succès")
             startTrafficSampling()
+            startHealthMonitor(profile, probeUrl)
             updateNotification("Connecté — ${profile.displayName}")
         } catch (c: kotlinx.coroutines.CancellationException) {
             teardownEngine()
@@ -286,14 +310,97 @@ class OnfaaTunnelVpnService : VpnService() {
     }
 
     private suspend fun resolveProfile(intent: Intent): TunnelProfile {
+        TunnelConfigRepository.ensureInitialized(this)
         val link = intent.getStringExtra(EXTRA_SHARE_LINK)
-        if (!link.isNullOrBlank()) {
-            return TunnelConfigRepository.import(link).getOrElse { failure ->
+        val profile = if (!link.isNullOrBlank()) {
+            TunnelConfigRepository.import(link).getOrElse { failure ->
                 throw IllegalStateException(failure.message ?: "Configuration invalide")
             }
+        } else {
+            TunnelConfigRepository.selectedProfile()
+                ?: throw IllegalStateException("Aucune configuration sélectionnée")
         }
-        return TunnelConfigRepository.selectedProfile()
-            ?: throw IllegalStateException("Aucune configuration sélectionnée")
+        if (profile.incomplete) {
+            throw IllegalStateException(
+                "Configuration incomplète : réimportez le lien ou le fichier JSON de « ${profile.displayName} »"
+            )
+        }
+        return profile
+    }
+
+    /**
+     * Real post-connection health watch: every check is an actual request
+     * through the tunnel. A failure moves the state to Reconnecting and starts
+     * a bounded recovery window; the state only returns to Connected after a
+     * probe succeeds again. Nothing reports Connected while the tunnel is not
+     * proven.
+     */
+    private fun startHealthMonitor(profile: TunnelProfile, probeUrl: String) {
+        healthJob?.cancel()
+        healthJob = scope.launch {
+            while (isActive && !destroyed) {
+                delay(HEALTH_CHECK_INTERVAL_MS)
+                if (destroyed) break
+                if (TunnelStatusRepository.state.value !is TunnelState.Connected) continue
+                val probe = ConnectivityProbe.check(probeUrl, timeoutMs = 8_000)
+                if (probe.ok) {
+                    Log.i(TAG, "Health probe ok: ${probe.detail}")
+                    continue
+                }
+                if (destroyed) break
+                TunnelStatusRepository.log(
+                    "Vérification périodique échouée : ${probe.detail}",
+                    LogSeverity.WARNING
+                )
+                awaitRecovery(profile, probeUrl)
+                if (TunnelStatusRepository.state.value is TunnelState.Error) break
+            }
+        }
+    }
+
+    private suspend fun awaitRecovery(profile: TunnelProfile, probeUrl: String) {
+        val deadline = SystemClock.elapsedRealtime() + RECONNECT_TIMEOUT_MS
+        var attempt = 1
+        TunnelStatusRepository.set(TunnelState.Reconnecting(attempt, profile.displayName))
+        updateNotification("Réseau perdu — reconnexion…")
+        while (!destroyed && SystemClock.elapsedRealtime() < deadline) {
+            delay(RECONNECT_DELAY_MS)
+            if (destroyed) return
+            val probe = ConnectivityProbe.check(probeUrl, timeoutMs = 8_000)
+            if (probe.ok) {
+                val since = connectedSinceEpochMs.takeIf { it > 0L } ?: System.currentTimeMillis()
+                TunnelStatusRepository.set(
+                    TunnelState.Connected(profile.displayName, profile.protocol, since)
+                )
+                TunnelStatusRepository.log(
+                    "Réseau rétabli — tunnel de nouveau vérifié (${probe.detail})",
+                    LogSeverity.SUCCESS
+                )
+                updateNotification("Connecté — ${profile.displayName}")
+                return
+            }
+            attempt++
+            if (attempt % 3 == 0) {
+                TunnelStatusRepository.log(
+                    "Reconnexion ${attempt} non aboutie : ${probe.detail}",
+                    LogSeverity.WARNING
+                )
+            }
+            if (!destroyed) TunnelStatusRepository.set(TunnelState.Reconnecting(attempt, profile.displayName))
+        }
+        if (destroyed) return
+        TunnelStatusRepository.error(
+            "Réseau indisponible : tunnel arrêté après ${RECONNECT_TIMEOUT_MS / 1_000} s de reconnexion"
+        )
+        lifecycle.withLock { teardownEngine() }
+        stopForegroundCompat()
+        stopSelf()
+    }
+
+    private fun stopHealthMonitor() {
+        healthJob?.cancel()
+        healthJob = null
+        connectedSinceEpochMs = 0L
     }
 
     private val isDebuggable: Boolean
@@ -373,6 +480,7 @@ class OnfaaTunnelVpnService : VpnService() {
     }
 
     private suspend fun teardownEngine() = withContext(NonCancellable) {
+        stopHealthMonitor()
         stopTrafficSampling()
         runCatching { XrayBridge.stopXray() }
             .onFailure { TunnelStatusRepository.log("Arrêt Xray : ${XrayErrorSanitizer.sanitize(it.message)}") }
