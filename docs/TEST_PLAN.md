@@ -61,10 +61,24 @@ Ce plan définit les catégories de tests nécessaires au fil des phases. Les ou
 - **Limite matérielle** : appareil physique ARM64 non disponible ; protocole fourni, statut en attente.
 - Documentation : `docs/PHASE_3_REPORT.md`.
 
-### Phase 4 — Importation des configurations
-- Tests de parsing/validation pour VLESS et VMess (cas valides, invalides, limites).
-- Tests de persistance (Room) : création, lecture, mise à jour, suppression.
-- Tests de sécurité : absence de fuite de secrets dans les logs/exports par défaut.
+### Phase 4 — Importation des configurations (livrée)
+
+**Unitaires JVM (`:app:testDebugUnitTest`)** — 23/23 au total :
+- `ConfigImporterJsonTest` (8) : JSON malformé, entrée vide, aucune sortie VLESS/VMess, protocole non supporté, plusieurs sorties, identifiant manquant, port invalide, adresse manquante.
+- `LogFormatterTest` (4) : aller-retour ligne de fichier, réduction des sauts de ligne, rejet des lignes corrompues, export avec en-tête et secrets masqués.
+- Tests existants conservés : assainissement (6), validation de liens (3), modèle (2).
+
+**Instrumentés (émulateur x86_64 API 35)** — 27 au total, dont 6 nouveaux :
+- `ProfileStorageInstrumentedTest` (3) : migration v1→v2 avec base Room v1 réelle et conservation des lignes ; CRUD DAO avec identifiant uniquement dans la colonne chiffrée ; `SecretCipher` aller-retour et rejet d’une charge altérée (GCM).
+- `LogFileStoreInstrumentedTest` (3) : persistance après recréation du store (redémarrage), rotation à la limite de 256 Ko, taille relue bornée et effacement complet.
+- Tests Phase 3 conservés : 21 (moteur, configurations, permission, E2E).
+
+**Sécurité** :
+- aucun secret dans les journaux : UUID et charges base64 masqués à l’écriture puis à l’export ;
+- aucun repli en clair si le chiffrement Keystore échoue ;
+- profils v1 migrés marqués incomplets, connexion refusée avec message.
+
+**Validation** : Android CI [#44011899010](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44011899010) `success` (commit `230008c`, 23/23 unitaires) ; E2E [#44011899095](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44011899095) `success` — **27/27 instrumentés** (0 échec, 0 ignoré, 45,579 s), `vless=3 vmess=3`. Détail : `docs/PHASE_4_REPORT.md` §9.
 
 ### Phase 5 — Interface complète
 - Tests UI/instrumentation (navigation, états connexion, erreurs).

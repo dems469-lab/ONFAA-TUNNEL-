@@ -27,7 +27,7 @@ La roadmap est organisée en dix phases. Chaque phase doit être documentée, va
 ## Phase 4 — Importation et gestion des configurations
 - **Objectif :** persister et gérer des configurations personnelles (VLESS, VMess) de façon sécurisée.
 - **Livrables attendus :** persistance chiffrée locale, sélection de profil active, gestion des profils, migration des profils en mémoire de la Phase 3.
-- **Note :** l’import, la validation moteur et la conversion VLESS/VMess sont déjà réalisés en Phase 3 (`ConfigImporter`), sans persistance.
+- **État :** **livrée et testée en CI** — Room v2 (migration `1 → 2` testée), outbound chiffré AES-256-GCM via Android Keystore, sélection persistée en DataStore, import lien/presse-papiers/fichier/JSON Xray validé par le moteur, cycle de vie VPN à 9 états avec surveillance et reprise bornée, journaux bornés/assainis/exportables, statistiques mesurées. Android CI [#44011899010](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44011899010) `success` (23/23 unitaires) ; E2E [#44011899095](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44011899095) `success` — 27/27 instrumentés. Voir `docs/PHASE_4_REPORT.md`. **Non revendiqué** : exécution ARM64 physique, changement d’IP publique.
 
 ## Phase 5 — Interface complète
 - **Objectif :** implémenter l’UI complète selon la spécification.

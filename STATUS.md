@@ -2,19 +2,55 @@
 
 ## État de phase
 
-- **Phase actuelle :** 3 — Connexion VPN réelle (`VpnService` ↔ libXray ↔ Xray-core) — **terminée et validée en CI (émulateur x86_64)**
-- **État :** le tunnel réel fonctionne de bout en bout en CI. Le run [#44004893595](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44004893595) (commit `5f51831`) est **vert : 25/25 étapes**, 21/21 tests instrumentés, VLESS et VMess avec sonde HTTP 200 réelle, DNS `onfaa.test` → `192.0.2.10` via le tunnel, journal d’accès du serveur Xray officiel. Deux limites restent **non revendiquées** : appareil physique ARM64 et changement d’IP publique.
+- **Phase actuelle :** 4 — Persistance réelle, import étendu, cycle de vie durci — **livrée, compilée et testée en CI (émulateur x86_64)**
+- **État :** les profils sont persistés dans Room v2 (outbound chiffré AES-256-GCM via Android Keystore), la sélection dans DataStore, l’import couvre liens, presse-papiers, fichiers et JSON Xray, le service expose 9 états avec surveillance et reprise bornée, les journaux sont bornés/assainis/exportables et les statistiques sont mesurées. Le run Android CI [#44011899010](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44011899010) (commit `230008c`) est **vert** (compilation, 23/23 unitaires, APK debug + APK de tests). Le run E2E [#44011899095](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44011899095) est **vert** : 30 étapes, **27/27 tests instrumentés** (0 échec, 0 ignoré), E2E VLESS et VMess avec sonde réelle, `ACCESS_LOG_PER_PROTOCOL_OK vless=3 vmess=3`. Détail : `docs/PHASE_4_REPORT.md` §9.
+- **Phase 3 :** terminée et validée en CI (tunnel réel VLESS/VMess, 21/21 instrumentés, run [#44004893595](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44004893595)) ; preuves conservées ci-dessous.
 - **Phase 2B :** terminée et validée (AAR officiel, API native, 6/6 tests instrumentés) ; preuves conservées ci-dessous.
 
 ## Références dépôt
 
 - **Dépôt :** https://github.com/dems469-lab/ONFAA-TUNNEL-
 - **Branche principale :** `main`
+- **Commit Phase 4 (code) :** `230008c`
+- **Runs CI Phase 4 :** [Android CI #44011899010](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44011899010) — `success` ; [libXray Android build and real VPN E2E #44011899095](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44011899095) — `success`, 27/27 instrumentés
 - **Commit Phase 3 (code) :** `5f518313082fc095eeb118553b6fd969318cddfd`
 - **Run CI Phase 3 réussi :** [libXray Android build and real VPN E2E #44004893595](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44004893595) — `success`, 25/25 étapes
 - **Run de confirmation (CI allégée, commit `aef515e`) :** [#44006718908](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44006718908) — `success`, 21/21 instrumentés, `vless=3 vmess=3`
 - **Dernier commit Phase 2B validé :** `f116442021b4e80508e3ef2448d21980f2207534`
 - **Run Phase 2B réussi :** [#43965698249](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/43965698249)
+
+## Implémentation Phase 4 (livrée)
+
+### Persistance et sécurité
+
+- **Room v2** (`onfaa_profiles.db`, table `server_configs`) : ajout, renommage, suppression, favoris, sélection ; les profils survivent au redémarrage du processus et de l’appareil.
+- **Migration `1 → 2`** testée : la table est recréée explicitement puis recopiée ; les lignes v1 sont conservées, marquées `incomplete` (aucune donnée d’authentification en v1) et ne peuvent pas être connectées tant que le lien n’est pas réimporté.
+- **Chiffrement** : l’outbound Xray complet (UUID, clés) est chiffré en AES-256-GCM par une clé non exportable de l’Android Keystore (alias `onfaa_server_payload_v1`). Échec de chiffrement = pas d’enregistrement (aucun repli en clair).
+- **Sélection** persistée dans DataStore (`onfaa_preferences`, clé `selected_config_id`) ; premier import sélectionné automatiquement ; repli déterministe si le profil actif disparaît.
+
+### Import
+
+- Liens `vless://` / `vmess://`, presse-papiers, fichier (`OpenDocument`, ≤ 256 Ko) et **configuration Xray JSON** (ou un outbound unique) ; `settings.vnext[0].users[0]` aplati.
+- Validation en deux temps : structure puis `testXray` (moteur officiel) ; rien n’est persisté si le moteur refuse.
+- Erreurs lisibles en français, assainies (UUID/liens masqués) ; nom personnalisable à l’import.
+
+### Cycle de vie VPN
+
+- États : `Idle`, `AwaitingPermission`, `Preparing`, `Connecting`, `Verifying`, `Connected`, `Reconnecting(attempt, profil)`, `Disconnecting`, `Error`.
+- Double démarrage refusé (mutex + drapeaux + état) ; profil absent ou incomplet refusé avec message.
+- `Connected` uniquement après `getXrayState` **et** sonde HTTP réelle ; surveillance toutes les 20 s, reprise toutes les 5 s pendant 90 s maximum, puis `Error` et arrêt propre.
+- Arrêt : `stopXray`, `resetDNS`, fermeture du TUN, jobs annulés, `Idle`/`Error`.
+
+### Journaux et statistiques
+
+- Tampon mémoire de 500 événements + fichier tournant `filesDir/logs/onfaa.log` (256 Ko, copie `.1`, 200 dernières lignes relues au démarrage) ; écriture sur thread dédié.
+- Filtres par niveau, recherche, copie, export `CreateDocument`, effacement confirmé ; secrets réassainis à l’export.
+- Durée réelle depuis `sinceEpochMs`, octets/débits `TrafficStats` de l’UID applicatif, état et profil actif ; l’UI précise explicitement qu’il ne s’agit **pas** d’un compteur noyau du TUN.
+
+### Tests Phase 4
+
+- Unitaires : **23/23** (dont `ConfigImporterJsonTest` 8, `LogFormatterTest` 4).
+- Instrumentés : **27** au total (dont `ProfileStorageInstrumentedTest` 3 : migration v1→v2, CRUD chiffré, altération GCM ; `LogFileStoreInstrumentedTest` 3 : redémarrage, rotation, borne/effacement).
 
 ## Implémentation Phase 3 (livrée)
 
@@ -45,7 +81,7 @@
 - Conversion réelle par `convertShareLinksToXrayJson` de libXray ; l’outbound produit est embarqué dans une configuration TUN complète puis validée par `testXray`.
 - Erreurs précises et assainies (UUID, liens et secrets masqués) ; aucune configuration complète journalisée.
 - Refus explicite des liens VMess base64 historiques (non acceptés par libXray v26.11.9) avec message indiquant le format URL attendu.
-- Profils conservés **en mémoire uniquement** pour cette phase (pas d’écriture en clair sur disque) ; persistance chiffrée différée et documentée comme limite.
+- Profils **persistés dans Room** avec outbound chiffré depuis la Phase 4 ; la Phase 3 les gardait en mémoire.
 
 ### UI
 
@@ -84,9 +120,11 @@ aucun `SERVER_BLOCKED_TUNNEL_TARGET`. Détail et extraits : `docs/PHASE_3_REPORT
 
 ## Limites résiduelles (Phase 3)
 
-- **Appareil physique ARM64 : non disponible.** L’exécution native du moteur est prouvée sur x86_64 émulé ; les binaires ARM sont présents et structurellement vérifiés mais pas exécutés sur téléphone physique. Protocole de test physique fourni dans `docs/PHASE_3_REPORT.md`, statut **en attente**.
+- **Appareil physique ARM64 : non disponible.** L’exécution native du moteur est prouvée sur x86_64 émulé ; les binaires ARM sont présents et structurellement vérifiés mais pas exécutés sur téléphone physique. Protocole de test physique fourni dans `docs/PHASE_4_REPORT.md` §10, statut **en attente**.
 - **Changement d’IP publique : non démontrable en CI** (le runner et l’émulateur partagent la même sortie réseau). Protocole manuel documenté ; aucune affirmation d’IP publique changée n’est faite.
-- Profils en mémoire uniquement (pas de persistance chiffrée).
+- **Perte de clé Keystore** : les profils existants deviennent illisibles, sont marqués `incomplete` et doivent être réimportés (comportement affiché, aucun repli en clair).
+- **Reconnexion bornée** à 90 s, sans stratégie exponentielle ni reprise prolongée en arrière-plan.
+- **Journaux** : un seul fichier tournant ; pas d’archive multi-fichiers.
 - Liens VMess base64 historiques refusés (libXray v26.11.9 ne les convertit pas) ; les liens VMess URL `vmess://UUID@hôte:port?...` sont supportés.
 - Trafic mesuré par `android.net.TrafficStats` pour l’UID applicatif (sockets du moteur inclus), pas par un compteur noyau du TUN ; les valeurs sont réelles ou « indisponible ».
 - Options moteur de la Phase 5 (fragmentation, ad block, gaming, hotspot, routage choisi, DNS choisi, MTU, mux, niveau de log, reconnexion automatique) persistées mais **non raccordées** ; l’UI l’indique explicitement.
@@ -102,9 +140,9 @@ aucun `SERVER_BLOCKED_TUNNEL_TARGET`. Détail et extraits : `docs/PHASE_3_REPORT
 
 ## Prochaine tâche
 
-1. Exécuter le protocole ARM64 sur un appareil physique dès qu’il est disponible (protocole `docs/PHASE_3_REPORT.md` §11) ; ne pas revendiquer avant.
-2. Faire valider en CI la compilation des changements UI Phase 5 (thèmes, navigation, sous-écrans, journaux) avant toute revendication de livraison.
-3. Passer à la persistance chiffrée des profils (phase suivante) sans régresser l’intégration réelle validée.
+1. Lire `docs/PHASE_4_REPORT.md` §9 : run E2E #44011899095 vert, 27/27 instrumentés, `vless=3 vmess=3`, artefacts `libxray-poc-report` et `onfaa-tunnel-debug-apk`.
+2. Exécuter le protocole ARM64 sur un appareil physique dès qu’il est disponible (`docs/PHASE_4_REPORT.md` §10) ; ne pas revendiquer avant.
+3. Faire valider en CI la compilation des changements UI Phase 5 (thèmes, navigation, sous-écrans) avant toute revendication de livraison.
 
 ## Instructions de reprise pour une autre IA
 

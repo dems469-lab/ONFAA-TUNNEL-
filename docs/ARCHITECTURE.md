@@ -29,9 +29,21 @@
 - **DNS/routage** : port 53 issu du TUN → `dns-out` ; requêtes DNS internes → sortie directe ; réseaux privés → direct ; trafic restant → proxy.
 - **États** : `Idle`/`Connecting`/`Verifying`/`Connected`/`Disconnecting`/`Error`. `Connected` exige `runXray` réussi, `getXrayState=true` et une **sonde HTTP réelle** à travers le tunnel.
 - **Arrêt** : `stopXray` → `resetDNS` → neutralisation du protector → fermeture du TUN → arrêt du foreground → `stopSelf` ; gestion de `onRevoke`/`onDestroy`.
-- **Import** : validation réelle par le moteur, erreurs précises, secrets masqués ; profils en mémoire uniquement (persistance chiffrée en phase suivante).
+- **Import** : validation réelle par le moteur, erreurs précises, secrets masqués ; profils en mémoire uniquement à ce stade (persistance chiffrée livrée en Phase 4).
 - **Validation CI** : run `44004893595` — 21/21 tests instrumentés, E2E VLESS et VMess avec sonde HTTP 200 à travers le TUN, DNS via `dns-out`, journal d’accès serveur par protocole. Fixture : Xray-core officiel épinglé, inbounds loopback VLESS/VMess, token sur `192.0.2.10:18080` via `freedom` `redirect` (avec `finalRules` `allow` explicite, car Xray 26.x bloque par défaut les destinations privées pour ces inbounds).
 - **Limite** : validation native prouvée sur émulateur x86_64 ; appareil physique ARM64 à exécuter.
+
+## État Phase 4 (persistance, import étendu, cycle de vie durci)
+
+- **Persistance Room réelle** : table `server_configs` en version 2 (`ProfileEntity`/`ProfileDao`/`OnfaaDatabase`). Colonnes : `id`, `name`, `protocol`, `endpoint`, `security`, `payloadCipher`, `isFavorite`, `notes`, `createdAt`, `updatedAt`. `TunnelConfigRepository` est un singleton initialisé par `OnfaaTunnelApp` ; il expose des `StateFlow` (profils, sélection, favoris) alimentés par Room et DataStore.
+- **Migration `1 → 2`** : la table est recréée explicitement (pas d’`ALTER TABLE ... DEFAULT`) puis les lignes sont copiées ; les lignes v1 survivent avec `security='none'` et `payloadCipher=''`. Elles sont affichées comme **incomplètes** et ne peuvent pas être connectées tant que le lien n’est pas réimporté (v1 ne stockait aucun identifiant). Test instrumenté dédié (`ProfileStorageInstrumentedTest`).
+- **Protection des données sensibles** : l’outbound Xray (UUID, clés) est chiffré en **AES-256-GCM** par `SecretCipher`, avec une clé non exportable générée dans le **Android Keystore** (alias `onfaa_server_payload_v1`). Seul le texte chiffré (`base64(iv||ciphertext)`) est écrit dans Room ; un échec de chiffrement annule l’enregistrement, jamais de repli en clair. Les champs d’affichage (nom, protocole, hôte, sécurité) restent en clair car nécessaires à l’UI.
+- **Sélection persistée** : identifiant du profil actif dans DataStore (`onfaa_preferences`, clé `selected_config_id`), favoris dans Room.
+- **Import étendu** : `ConfigImporter` accepte un lien `vless://`/`vmess://`, un **objet outbound** ou une **configuration Xray JSON** (une seule sortie VLESS/VMess exigée ; `settings.vnext[0].users[0]` aplati), du **presse-papiers** et un **fichier** (via `ActivityResultContracts.OpenDocument`, limite 256 Ko). La structure est validée avant l’appel natif, puis `testXray` valide la configuration ; rien n’est enregistré si le moteur refuse.
+- **Cycle de vie VPN** : états `AwaitingPermission`, `Preparing`, `Connecting`, `Verifying`, `Connected`, `Reconnecting(attempt)`, `Disconnecting`, `Error` en plus de `Idle`. Une surveillance post-connexion rejoue une **sonde réelle** toutes les 20 s ; en cas d’échec l’état passe immédiatement à `Reconnecting` (jamais `Connected`), une fenêtre de reconnexion bornée (90 s, sonde toutes les 5 s) est ouverte, et `Connected` n’est republié qu’après une sonde réussie. Au-delà, erreur réelle et arrêt propre. Double démarrage refusé (mutex + état + `engineRunning`). Profil incomplet refusé avec message explicite.
+- **Journaux** : tampon mémoire borné (500 événements) **doublé d’un fichier tournant** `filesDir/logs/onfaa.log` (256 Ko, copie `.1`, relecture des 200 dernières lignes au démarrage). Écriture sur un thread dédié ; chaque message est assaini à l’écriture puis à l’export (UUID, liens, valeurs base64). Filtres par niveau, recherche texte, copie, export via `CreateDocument`, effacement confirmé.
+- **Statistiques** : durée de connexion (horloge réelle depuis `sinceEpochMs`), octets/débits `android.net.TrafficStats` de l’UID applicatif, état du tunnel, profil actif. L’UI indique explicitement que ce sont des compteurs UID (pas un compteur noyau du TUN) et affiche « indisponible » si la plateforme renvoie `UNSUPPORTED`.
+- **Limite inchangée** : validation native sur émulateur x86_64 ; appareil physique ARM64 à exécuter.
 
 ## Vue d’ensemble
 
@@ -56,10 +68,11 @@ Application Android native en **Kotlin**, structurée autour de :
 - **libXray** : couche de liaison utilisée par l’application Android pour démarrer/arrêter/configurer le cœur (API exacte à confirmer ; **aucune signature inventée**).
 - **Contrainte** : pas de substitution par sing-box ou autre moteur.
 
-### 3. Persistance
+### 3. Persistance (Phase 4)
 
-- **Room** : stockage structuré (profils/serveurs, métadonnées d’import, historiques/journaux si retenu, etc. — schéma à définir en phases ultérieures).
-- **DataStore** : préférences utilisateur (thème, options DNS/routage/UI, drapeaux de diagnostic, etc.).
+- **Room** : base `onfaa_profiles.db`, table `server_configs` v2. Les profils survivent au redémarrage du processus et de l’appareil ; l’outbound moteur est chiffré (AES-256-GCM + Android Keystore), jamais en clair.
+- **DataStore** : préférences utilisateur (`onfaa_preferences`) : thème, `selected_config_id`, options UI. La sélection de profil est appliquée au démarrage.
+- **Fichier de journaux** : `filesDir/logs/onfaa.log` (+ `.1`), borné et assaini, pour diagnostiquer après un crash.
 
 ### 4. Asynchronisme et état
 
@@ -73,20 +86,27 @@ Application Android native en **Kotlin**, structurée autour de :
 - **Statistiques & diagnostics** : collecte de métriques réelles disponibles, affichage, export contrôlé des logs.
 - **DNS & routage** : paramètres exposés à l’utilisateur en cohérence avec les capacités du moteur et d’Android.
 
-## Flux réel (Phase 3)
+## Flux réel (Phase 4)
 
-1. L’utilisateur importe un lien VLESS/VMess ; `ConfigImporter` appelle le convertisseur libXray, construit la configuration TUN et la fait valider par `testXray`.
-2. L’utilisateur sélectionne un profil et demande la connexion ; l’UI obtient le consentement `VpnService.prepare` si nécessaire puis démarre le service au premier plan.
-3. Le service établit le TUN, enregistre le protector de sockets, configure `setDNS`, construit la configuration complète, la valide puis appelle `runXray`.
-4. Le service vérifie `getXrayState` puis effectue une requête HTTP réelle à travers le tunnel ; seulement alors il publie `Connected`.
-5. À l’arrêt (bouton, notification, révocation ou destruction), le service arrête le moteur, restaure le DNS, ferme le TUN et publie `Idle`/`Error`.
+1. L’utilisateur importe un lien, un fichier, le presse-papiers ou un JSON Xray ; `ConfigImporter` convertit/normalise, valide la structure puis la configuration complète via `testXray`. Le profil validé est chiffré (`SecretCipher`) et enregistré dans Room ; le premier profil importé devient le profil actif (persisté dans DataStore).
+2. L’utilisateur sélectionne un profil (persisté) et demande la connexion ; l’UI publie `AwaitingPermission`, obtient le consentement `VpnService.prepare` si nécessaire puis démarre le service au premier plan.
+3. Le service publie `Preparing`, résout le profil sélectionné (refus si incomplet), valide à nouveau la configuration, établit le TUN, publie `Connecting`, enregistre le protector de sockets, configure `setDNS`, construit la configuration complète et appelle `runXray`.
+4. Le service vérifie `getXrayState`, publie `Verifying`, puis effectue une requête HTTP réelle à travers le tunnel ; seulement alors il publie `Connected` et démarre l’échantillonnage `TrafficStats`.
+5. Une sonde périodique (20 s) revalide le tunnel. En cas d’échec : `Reconnecting(attempt)`, sondes de reprise toutes les 5 s pendant 90 s maximum ; retour à `Connected` seulement après une sonde réussie, sinon `Error` et arrêt propre.
+6. À l’arrêt (bouton, notification, révocation ou destruction), le service arrête le moteur, restaure le DNS, ferme le TUN, publie `Idle`/`Error` et conserve les journaux assainis sur disque.
 
-## Décisions différées / à confirmer
+## Décisions prises (Phases 1–4)
 
-- Format(s) d’import supportés et stratégie de validation.
-- Méthode exacte d’intégration binaire/librairie de `libXray` (AAR, .so, artefacts) et API publique.
-- Stratégie de collecte des statistiques (sources Android vs métriques moteur).
-- Modèle de données Room détaillé et politique de migration.
-- Architecture UI détaillée (navigation, state holders) — cadrée par `docs/design/DESIGN_SPEC.md`.
+- Import : liens `vless://`/`vmess://`, outbound unique ou configuration Xray JSON, presse-papiers, fichier ; validation obligatoire par `testXray`.
+- Intégration libXray : AAR officiel épinglé, résolu par réflexion (`libXray.LibXray#invoke`), un seul runtime Go.
+- Statistiques : `android.net.TrafficStats` de l’UID applicatif, présentées comme telles (« pas un compteur noyau du TUN »).
+- Modèle Room v2 et migration `1 → 2` testée ; données sensibles chiffrées, sélection en DataStore.
+- Architecture UI : Compose Material 3, Navigation Compose ; la refonte visuelle complète reste en Phase 5.
+
+## Points encore ouverts
+
+- Exécution sur appareil physique ARM64 (protocole fourni, non exécuté).
+- Démonstration d’un changement d’IP publique (non démontrable en CI).
+- Rotation de clé du Keystore : la perte de clé rend les profils existants illisibles ; ils sont alors marqués « incomplets » et doivent être réimportés (comportement assumé et affiché).
 
 Ces points doivent être tracés dans [`DECISIONS.md`](DECISIONS.md) au fil de l’avancement.

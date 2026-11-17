@@ -6,6 +6,19 @@ Le format s’inspire de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/
 
 ## [Unreleased]
 
+### Phase 4 — persistance réelle, import étendu, cycle de vie durci (livrée, CI verte)
+- **Persistance Room v2** : table `server_configs` réellement écrite (`ProfileEntity`, `ProfileDao`, `OnfaaDatabase` v2) ; ajout, renommage, suppression, favoris et sélection ; les profils survivent au redémarrage de l’application et de l’appareil.
+- **Migration `1 → 2`** : table recréée explicitement puis recopiée (pas d’`ALTER TABLE ... DEFAULT`) ; lignes v1 conservées, marquées `incomplete` car la v1 ne stockait aucune donnée d’authentification ; connexion refusée avec message tant que le lien n’est pas réimporté. Test instrumenté avec une base v1 réelle.
+- **Sécurité** : outbound Xray complet (UUID, clés) chiffré en **AES-256-GCM** par une clé non exportable de l’**Android Keystore** (alias `onfaa_server_payload_v1`, `SecretCipher`) ; échec de chiffrement = pas d’enregistrement, aucun repli en clair. Seuls les champs d’affichage restent lisibles.
+- **Sélection persistée** dans DataStore (`onfaa_preferences`, `selected_config_id`) ; premier import sélectionné automatiquement ; repli déterministe si le profil actif disparaît.
+- **Import étendu** : liens `vless://`/`vmess://`, presse-papiers, fichier (`OpenDocument`, ≤ 256 Ko) et configuration **Xray JSON** (ou outbound unique) ; `settings.vnext[0].users[0]` aplati ; structure validée puis `testXray` avant persistance ; erreurs lisibles et assainies ; nom personnalisable.
+- **Cycle de vie VPN durci** : `AwaitingPermission`, `Preparing`, `Connecting`, `Verifying`, `Connected`, `Reconnecting(attempt, profil)`, `Disconnecting`, `Error`. Double démarrage refusé (mutex + drapeaux). `Connected` uniquement après `getXrayState` et sonde HTTP réelle. Surveillance toutes les 20 s ; échec → `Reconnecting`, reprise toutes les 5 s pendant 90 s, puis `Error` et arrêt propre. Profil incomplet refusé explicitement.
+- **Journaux** : tampon borné de 500 événements + fichier tournant `filesDir/logs/onfaa.log` (256 Ko, copie `.1`, 200 dernières lignes relues au démarrage, thread dédié) ; filtres par niveau, recherche, copie, export `CreateDocument`, effacement confirmé ; secrets réassainis à l’écriture et à l’export.
+- **Statistiques** : durée réelle depuis `sinceEpochMs`, octets/débits `TrafficStats` de l’UID applicatif, état et profil actif ; l’UI précise que ce ne sont **pas** des compteurs noyau du TUN et affiche « indisponible » si la plateforme ne fournit rien.
+- **Tests** : `ConfigImporterJsonTest` (8), `LogFormatterTest` (4) en unitaire ; `ProfileStorageInstrumentedTest` (3 : migration, CRUD chiffré, altération GCM) et `LogFileStoreInstrumentedTest` (3 : persistance, rotation, borne/effacement) en instrumenté. Total : **23 unitaires**, **27 instrumentés**.
+- **Validation** : [Android CI #44011899010](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44011899010) `success` (commit `230008c`) — compilation, 23/23 unitaires, APK debug et APK de tests instrumentés ; [E2E #44011899095](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44011899095) `success` — **27/27 instrumentés** (45,579 s), E2E VLESS et VMess, `vless=3 vmess=3` (détails `docs/PHASE_4_REPORT.md` §9).
+- **Limites** : appareil physique ARM64 non exécuté ; changement d’IP publique non démontrable en CI ; perte de clé Keystore = profils à réimporter ; reconnexion bornée à 90 s ; un seul fichier de logs tournant.
+
 ### Phase 5 — UI/UX, thèmes et références visuelles (implémentation livrée, compilation non vérifiée localement)
 - **Références** : 5 images analysées individuellement et classées sans modification dans `docs/design/reference/` (`logs`, `appearance`, `servers`, `settings`) ; **5 classées, 0 non identifiée**. Les images livrées en `.png` sont des JPEG ; hashes et dimensions consignés. Aucune référence d’accueil n’a été fournie : l’accueil est documenté comme reconstruit.
 - **Thèmes** : 7 palettes (ONFAA, Aurora, Ember, Graphite, Orchid, Paper, Matcha) × 3 modes (Système, Clair, Sombre), persistés avec DataStore et appliqués à toute l’application. « Dark/Light » est traité comme le mode d’affichage, pas comme une huitième palette.
@@ -13,7 +26,7 @@ Le format s’inspire de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/
 - **Navigation** : 4 onglets (Connexion, Configs, Paramètres, Journaux), sous-écrans de paramètres et Apparence. L’incohérence des références (3 ou 4 onglets) est documentée.
 - **Écrans** : accueil réel (consentement VPN, états, durée, trafic `TrafficStats`), Configs (recherche, filtres, tri, favoris, latence TCP réelle, import lien/fichier, détail, suppression), Paramètres (groupes, recherche, sous-pages), Apparence, Journaux (filtres, recherche, copie, effacement, export texte, diagnostic réel).
 - **Honnêteté des données** : aucune connexion, statistique ou fuite simulée ; la mention « aucune fuite » de la maquette est remplacée par « non testées » ; les options moteur non raccordées sont persistées mais signalées comme UI-only.
-- **Limites** : compilation/tests UI non exécutés localement (pas de JDK/SDK Android) ; validation CI à faire ; accueil sans référence ; QR import non implémenté ; profils en mémoire uniquement ; textes français codés en dur.
+- **Limites** : compilation/tests UI non exécutés localement (pas de JDK/SDK Android) ; validation CI à faire ; accueil sans référence ; QR import non implémenté ; textes français codés en dur.
 
 ### Phase 3 — connexion VPN réelle via libXray/Xray-core (TERMINÉE, validée en CI sur émulateur x86_64)
 - `OnfaaTunnelVpnService` réel : TUN IPv4/IPv6, routes par défaut, DNS, foreground service, consentement VPN, cycle de vie complet (connexion, vérification, arrêt, révocation, destruction).
@@ -28,7 +41,7 @@ Le format s’inspire de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/
   - fixture serveur : `finalRules` explicite `allow` pour la cible de `redirect` `127.0.0.1:18080`, car Xray 26.x applique `defaultBlockPrivateRule` aux inbounds VLESS/VMess (sinon `target blocked by a finalrule` / blackhole) ;
   - fixture VLESS clair déplacée sur adresse LAN (`xray` refuse VLESS sans TLS vers une IP publique) et ajout d’un test de conversion VLESS public **avec TLS** ;
   - porte de preuve durcie : échec si le serveur journalise un blackhole, et exigence d’au moins une ligne d’accès par protocole.
-- **Limites** : appareil physique ARM64 non disponible ; changement d’IP publique non démontrable en CI ; profils en mémoire uniquement. Le trafic est mesuré via `android.net.TrafficStats` (UID applicatif) depuis la Phase 5, pas par un compteur noyau du TUN.
+- **Limites** : appareil physique ARM64 non disponible ; changement d’IP publique non démontrable en CI. Le trafic est mesuré via `android.net.TrafficStats` (UID applicatif), pas par un compteur noyau du TUN.
 - **Validation** : run [#44004893595](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44004893595) `success` (commit `5f51831`, 25/25 étapes) — **11/11 tests unitaires**, **21/21 tests instrumentés** (0 échec/erreur/ignoré), E2E VLESS et VMess avec sonde HTTP 200, DNS `onfaa.test` → `192.0.2.10`, journal d’accès `3 × vless-in -> token-redirect` + `3 × vmess-in -> token-redirect`, aucun blackhole serveur. APK debug `arm64-v8a/armeabi-v7a/x86/x86_64` publié.
 
 ### Phase 2 — audit et intégration libXray officielle (TERMINÉE, validée en CI)
@@ -39,7 +52,8 @@ Le format s’inspire de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/
 - **Limite résiduelle** : exécution native prouvée sur x86_64 émulé ; pas encore sur appareil physique arm64/armv7.
 
 ### À venir
-- **Phase 3** : connexion VPN réelle (`VpnService` + orchestration Xray/libXray), sans simulation ; validation sur appareil physique.
+- **Phase 5** : refonte visuelle (travail parallèle, hors de ce changelog Phase 4).
+- **Phase 6+** : options moteur raccordées, QR import, validation ARM64 physique.
 
 ## [0.1.0-phase1] — 2026-11-16 (publié et validé en CI)
 

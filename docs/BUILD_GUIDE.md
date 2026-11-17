@@ -87,6 +87,14 @@ Workflow : `.github/workflows/libxray-poc.yml` (déclencheurs : `push` sur `main
 
 **Résultats** : run [#44004893595](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44004893595) `success` (commit `5f51831`, 25/25 étapes) — 11/11 tests unitaires, 21/21 instrumentés, E2E VLESS et VMess, DNS et journal d’accès par protocole. Détail : `docs/PHASE_3_REPORT.md` §9. Les limites ARM64 physique et IP publique restent non revendiquées.
 
+## Phase 4 — persistance, import étendu, cycle de vie (CI verte)
+
+- **Aucun changement de chaîne de build** : Room 2.6.1, DataStore 1.1.1 et l’AAR libXray épinglé restent les seules dépendances ; `org.json:json:20240303` est ajouté en `testImplementation` uniquement (parsing JSON des tests unitaires JVM).
+- **Version** : `versionCode 4`, `versionName 0.4.0-phase4`.
+- **Workflows** : `.github/workflows/android.yml` (compilation, tests unitaires, `assembleDebug`, `assembleDebugAndroidTest`, APK) et `.github/workflows/libxray-poc.yml` (E2E réel + tous les instrumentés).
+- **Portes E2E inchangées** : `E2E_XML_VALIDATED`, `ACCESS_LOG_PER_PROTOCOL_OK`, `--suite VpnTunnelE2ETest --min-tests 4` — un test non exécuté échoue.
+- **Résultats** : Android CI [#44011899010](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44011899010) `success` (commit `230008c`) — 23/23 unitaires, APK debug et APK de tests ; E2E [#44011899095](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44011899095) `success` — 27/27 instrumentés. Artefacts `onfaa-tunnel-debug-apk` et `libxray-poc-report`. Détail : `docs/PHASE_4_REPORT.md`.
+
 ## Secrets et signature
 
 - Aucun secret, keystore, mot de passe ou token ne doit être commité.
