@@ -23,6 +23,12 @@ on:
 permissions:
   contents: read
 
+# A newer push on the same branch supersedes the previous E2E run: cancel it
+# instead of paying for two libXray builds and two emulator boots.
+concurrency:
+  group: libxray-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   LIBXRAY_REPO: https://github.com/XTLS/libXray.git
   LIBXRAY_TAG: v26.11.9
@@ -51,7 +57,9 @@ jobs:
   build-libxray-and-integrate:
     name: Build libXray, inspect AAR, integrate and build app
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    # The observed successful run is ~8 min; 60 min still leaves ample room for
+    # a slow NDK download while bounding a hung emulator or Gradle process.
+    timeout-minutes: 60
 
     steps:
       - name: Checkout ONFAA TUNNEL
@@ -389,17 +397,17 @@ jobs:
           } | tee "$REPORT/summary.md"
           cat "$REPORT/summary.md" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Run app unit tests
+      # One Gradle invocation avoids paying configuration/daemon startup three
+      # times. If unit tests or the debug APK fail, the emulator step is skipped
+      # by its default success() condition, which is exactly what we want.
+      - name: Unit-test, assemble debug APK and compile instrumented tests
         shell: bash
-        run: ./gradlew :app:testDebugUnitTest --stacktrace
-
-      - name: Assemble debug APK with integrated libXray
-        shell: bash
-        run: ./gradlew :app:assembleDebug --stacktrace
-
-      - name: Assemble androidTest APK (real-artifact instrumented tests compiled)
-        shell: bash
-        run: ./gradlew :app:assembleDebugAndroidTest --stacktrace
+        run: >-
+          ./gradlew
+          :app:testDebugUnitTest
+          :app:assembleDebug
+          :app:assembleDebugAndroidTest
+          --stacktrace
 
       - name: Enable KVM for the Android emulator
         shell: bash
@@ -411,7 +419,13 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
+      # Keep a single emulator boot for the whole instrumented suite: booting a
+      # second time for a VLESS/VMess split would cost more than it diagnoses.
+      # The AGP XML names each test case, and the access-log gate below counts
+      # VLESS and VMess separately, so a protocol failure stays identifiable.
       - name: Run real-artifact instrumented tests on emulator (x86_64, API 35)
+        id: instrumented_tests
+        timeout-minutes: 30
         uses: ReactiveCircus/android-emulator-runner@v2.38.0
         with:
           api-level: 35
@@ -432,7 +446,9 @@ jobs:
             ./gradlew :app:connectedDebugAndroidTest --stacktrace -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e=true -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.uuid="$E2E_UUID" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.host="10.0.2.2" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.vlessPort="$E2E_VLESS_PORT" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.vmessPort="$E2E_VMESS_PORT" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.dns="tcp+local://10.0.2.2:$E2E_DNS_PORT" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.probeUrl="http://$E2E_ANSWER_IP:$E2E_HTTP_PORT/token" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.token="$E2E_TOKEN"
 
       - name: Publish instrumented test results to job summary
-        if: always()
+        # Run after a test failure (we need its XML), but do not fabricate a
+        # "no results" report when the step never ran because a build failed.
+        if: always() && steps.instrumented_tests.outcome != 'skipped' && steps.instrumented_tests.outcome != 'cancelled'
         shell: bash
         run: |
           set -euo pipefail
@@ -453,8 +469,11 @@ jobs:
           cat "$REPORT/instrumented-summary.md" | tee -a "$REPORT/summary.md"
           cat "$REPORT/instrumented-summary.md" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Verify E2E evidence and stop local servers
-        if: always()
+      - name: Verify E2E evidence
+        # A failed instrumentation run still has XML and must be verified; a
+        # skipped run (build failure) has nothing to verify and is not turned
+        # into a misleading E2E_XML_MISSING failure.
+        if: always() && steps.instrumented_tests.outcome != 'skipped' && steps.instrumented_tests.outcome != 'cancelled'
         shell: bash
         run: |
           set -uo pipefail
@@ -480,13 +499,15 @@ jobs:
             FAIL=1
           fi
 
+          # Stop the servers before reading the logs so Xray flushes its access
+          # logger; the unconditional cleanup step below still removes the
+          # fixture route if this step exits early.
           if [ -f "$E2E_DIR/xray.pid" ]; then kill "$(cat "$E2E_DIR/xray.pid")" 2>/dev/null || true; fi
           if [ -f "$E2E_DIR/services.pid" ]; then kill "$(cat "$E2E_DIR/services.pid")" 2>/dev/null || true; fi
           sleep 1
           for f in services.log xray-server.log access.log xray-version.txt server.json token.txt; do
             cp "$E2E_DIR/$f" "$REPORT/e2e/$f" 2>/dev/null || true
           done
-          sudo ip addr del "$E2E_ANSWER_IP/32" dev lo 2>/dev/null || true
 
           if [ -s "$REPORT/e2e/access.log" ] && grep -q "$E2E_ANSWER_IP:$E2E_HTTP_PORT" "$REPORT/e2e/access.log"; then
             echo "ACCESS_LOG_PROVES_TUNNEL_DESTINATION" | tee -a "$REPORT/e2e/result.txt"
@@ -529,6 +550,25 @@ jobs:
           } > "$REPORT/e2e/summary.md"
           cat "$REPORT/e2e/summary.md" >> "$GITHUB_STEP_SUMMARY"
           exit "$FAIL"
+
+      # Cleanup is unconditional: it must run after a build failure, a test
+      # failure, or a successful run. It is deliberately separate from evidence
+      # verification so a verification failure cannot leak the Xray server or
+      # leave the TEST-NET route behind on the runner.
+      - name: Stop E2E servers and remove fixture route
+        if: always()
+        shell: bash
+        run: |
+          set -uo pipefail
+          REPORT="$GITHUB_WORKSPACE/poc-report"
+          mkdir -p "$REPORT/e2e"
+          if [ -f "$E2E_DIR/xray.pid" ]; then kill "$(cat "$E2E_DIR/xray.pid")" 2>/dev/null || true; fi
+          if [ -f "$E2E_DIR/services.pid" ]; then kill "$(cat "$E2E_DIR/services.pid")" 2>/dev/null || true; fi
+          sleep 1
+          for f in services.log xray-server.log access.log xray-version.txt server.json token.txt; do
+            cp "$E2E_DIR/$f" "$REPORT/e2e/$f" 2>/dev/null || true
+          done
+          sudo ip addr del "$E2E_ANSWER_IP/32" dev lo 2>/dev/null || true
 
       - name: Collect build reports
         if: always()
