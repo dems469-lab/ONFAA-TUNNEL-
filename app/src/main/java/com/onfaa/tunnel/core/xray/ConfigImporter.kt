@@ -1,9 +1,11 @@
 package com.onfaa.tunnel.core.xray
 
+import com.onfaa.tunnel.domain.model.InjectMode
 import com.onfaa.tunnel.domain.model.TunnelProfile
 import com.onfaa.tunnel.domain.model.TunnelProtocol
 import java.net.URLDecoder
 import java.security.MessageDigest
+import java.util.Base64
 import kotlinx.coroutines.CancellationException
 import org.json.JSONArray
 import org.json.JSONException
@@ -73,10 +75,12 @@ object ConfigImporter {
             )
         }
         if (scheme == "vmess" && !link.substringAfter("://").contains('@')) {
-            throw ConfigException(
-                "Format VMess base64 historique non pris en charge par libXray ; " +
-                    "utilisez un lien vmess://UUID@hôte:port ou une configuration Xray JSON"
-            )
+            // Historic v2rayN share format: vmess://base64(JSON). libXray only
+            // converts the URI form, so decode and rebuild the outbound here,
+            // then reuse the exact same JSON import path (structure checks +
+            // real engine validation) as a pasted configuration.
+            val (legacyName, json) = decodeLegacyVmessJson(link)
+            return importJsonOrThrow(json, name ?: legacyName)
         }
         requireEngine()
 
@@ -177,7 +181,155 @@ object ConfigImporter {
         return outbound
     }
 
-    // ------------------------------------------------------------- profile
+    // ----------------------------------------------------------------- json
+
+    /**
+     * Historic v2rayN share format: vmess://base64(JSON) whose fields are
+     * add, port, id, aid, scy, net, type, host, path, tls, sni, alpn, fp and
+     * ps. The payload is decoded, rebuilt as a single vmess outbound object
+     * and returned with the optional [ps] display name; the standard JSON
+     * import path then performs structure checks and real engine validation.
+     */
+    private fun decodeLegacyVmessJson(rawLink: String): Pair<String?, String> {
+        val payload = rawLink.substringAfter("://", "").trim().ifEmpty {
+            throw ConfigException("Lien VMess vide")
+        }
+
+        // Share links in the wild mix standard and URL-safe alphabets, drop
+        // the padding, URL-encode the padding or append a fragment label.
+        val base64 = payload.substringBefore('#')
+            .replace("%3D", "=", ignoreCase = true)
+            .replace('-', '+')
+            .replace('_', '/')
+            .replace(" ", "")
+        val padded = base64 + "=".repeat((4 - base64.length % 4) % 4)
+        val bytes = try {
+            Base64.getMimeDecoder().decode(padded)
+        } catch (failure: IllegalArgumentException) {
+            throw ConfigException(
+                "Lien VMess illisible : le bloc base64 du format historique est corrompu"
+            )
+        }
+        val config = try {
+            JSONObject(String(bytes, Charsets.UTF_8))
+        } catch (failure: JSONException) {
+            throw ConfigException(
+                "Le décodage VMess base64 n'a pas produit de JSON exploitable"
+            )
+        }
+
+        fun field(vararg keys: String): String {
+            for (key in keys) {
+                val value = config.optString(key, "").trim()
+                if (value.isNotEmpty()) return value
+            }
+            return ""
+        }
+
+        val address = field("add", "address")
+        if (address.isEmpty()) throw ConfigException("Adresse du serveur manquante dans le lien VMess")
+        val uuid = field("id", "uuid")
+        if (uuid.isEmpty()) throw ConfigException("UUID/identifiant manquant dans le lien VMess")
+        val port = field("port", "p").toIntOrNull()
+        if (port == null || port !in 1..65535) {
+            throw ConfigException("Port du serveur invalide dans le lien VMess")
+        }
+
+        val network = field("net", "network").lowercase().ifBlank { "tcp" }
+        val headerType = field("type").lowercase()
+        val host = field("host")
+        val path = field("path")
+        val sni = field("sni", "peer")
+        val alpn = field("alpn")
+        val fingerprint = field("fp", "fingerprint")
+        val tlsEnabled = field("tls").equals("tls", ignoreCase = true) ||
+            field("security").equals("tls", ignoreCase = true)
+
+        val user = JSONObject()
+            .put("id", uuid)
+            .put("alterId", field("aid", "alterId").toIntOrNull() ?: 0)
+            // scy is the cipher; a top-level "security" field means the TLS
+            // layer in some clients and must never become the cipher.
+            .put("security", field("scy").ifBlank { "auto" })
+
+        val stream = JSONObject()
+            .put("network", network)
+            .put("security", if (tlsEnabled) "tls" else "none")
+        if (tlsEnabled) {
+            val tlsSettings = JSONObject()
+                .put("serverName", if (sni.isNotEmpty()) sni else if (host.isNotEmpty()) host else address)
+            if (alpn.isNotEmpty()) {
+                tlsSettings.put("alpn", JSONArray(alpn.split(',').map { it.trim() }.filter { it.isNotEmpty() }))
+            }
+            if (fingerprint.isNotEmpty()) tlsSettings.put("fingerprint", fingerprint)
+            stream.put("tlsSettings", tlsSettings)
+        }
+        when (network) {
+            "ws" -> {
+                val wsSettings = JSONObject().put("path", path.ifBlank { "/" })
+                if (host.isNotEmpty()) {
+                    wsSettings.put("headers", JSONObject().put("Host", host))
+                }
+                stream.put("wsSettings", wsSettings)
+            }
+            "http", "h2" -> {
+                val httpSettings = JSONObject().put("path", path.ifBlank { "/" })
+                if (host.isNotEmpty()) httpSettings.put("host", JSONArray(listOf(host)))
+                stream.put("httpSettings", httpSettings)
+            }
+            "grpc" -> stream.put("grpcSettings", JSONObject().put("serviceName", path))
+            "kcp" -> stream.put(
+                "kcpSettings",
+                JSONObject().put("mtu", 1350).put(
+                    "headerType",
+                    headerType.ifBlank { "none" }
+                )
+            )
+            "tcp" -> if (headerType == "http") {
+                stream.put(
+                    "tcpSettings",
+                    JSONObject().put(
+                        "header",
+                        JSONObject()
+                            .put("type", "http")
+                            .put(
+                                "request",
+                                JSONObject()
+                                    .put("version", "1.1")
+                                    .put("method", "GET")
+                                    .put("path", JSONArray(listOf(path.ifBlank { "/" })))
+                                    .put(
+                                        "headers",
+                                        JSONObject()
+                                            .put(
+                                                "Host",
+                                                JSONArray(listOf(host.ifBlank { address }))
+                                            )
+                                            .put("User-Agent", JSONArray(listOf("golang")))
+                                            .put(
+                                                "Accept-Encoding",
+                                                JSONArray(listOf("gzip, deflate"))
+                                            )
+                                    )
+                            )
+                    )
+                )
+            }
+        }
+
+        val outbound = JSONObject()
+            .put("protocol", "vmess")
+            .put("settings", JSONObject().put("vnext", JSONArray().put(JSONObject()
+                .put("address", address)
+                .put("port", port)
+                .put("users", JSONArray().put(user))
+            )))
+            .put("streamSettings", stream)
+
+        return field("ps", "remark", "name").ifBlank { null } to outbound.toString()
+    }
+
+    // -------------------------------------------------------------- profile
 
     private fun profileFromOutbound(
         outbound: JSONObject,
@@ -222,7 +374,12 @@ object ConfigImporter {
             protocol = protocol,
             endpoint = "$address:$port",
             security = security,
-            outboundJson = outboundJson
+            outboundJson = outboundJson,
+            injectMode = when (security.lowercase()) {
+                "tls", "reality" -> InjectMode.PROXY_SNI
+                else -> InjectMode.PROXY
+            },
+            sni = outbound.optJSONObject("streamSettings")?.optString("sni")?.takeIf { it.isNotBlank() }
         )
     }
 

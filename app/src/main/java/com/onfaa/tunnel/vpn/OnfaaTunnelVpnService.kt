@@ -159,7 +159,9 @@ class OnfaaTunnelVpnService : VpnService() {
                     profile = profile,
                     tunFd = 0,
                     dnsEndpoints = listOf(dnsEndpoint),
-                    logLevel = engineLogLevel
+                    logLevel = engineLogLevel,
+                    injectMode = profile.injectMode,
+                    sni = profile.sni
                 )
             )
             if (!validation.success) {
@@ -201,7 +203,9 @@ class OnfaaTunnelVpnService : VpnService() {
                 profile = profile,
                 tunFd = descriptor.fd,
                 dnsEndpoints = listOf(dnsEndpoint),
-                logLevel = engineLogLevel
+                logLevel = engineLogLevel,
+                injectMode = profile.injectMode,
+                sni = profile.sni
             )
 
             val started = XrayBridge.runXray(config)

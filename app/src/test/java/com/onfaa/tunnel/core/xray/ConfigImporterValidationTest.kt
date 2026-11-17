@@ -21,10 +21,12 @@ class ConfigImporterValidationTest {
     }
 
     @Test
-    fun rejectsLegacyBase64VmessWithPreciseMessage() = runBlocking {
+    fun rejectsLegacyBase64VmessWithoutUuid() = runBlocking {
+        // {"v":"2","add":"example.com"} — decodes, then the standard structure
+        // check reports the missing credential before the engine is touched.
         val error = ConfigImporter.importLink("vmess://eyJ2IjoiMiIsImFkZCI6ImV4YW1wbGUuY29tIn0=")
             .exceptionOrNull()
         assertTrue(error is ConfigException)
-        assertTrue(error?.message.orEmpty().contains("base64 historique"))
+        assertTrue(error?.message.orEmpty().contains("UUID/identifiant"))
     }
 }

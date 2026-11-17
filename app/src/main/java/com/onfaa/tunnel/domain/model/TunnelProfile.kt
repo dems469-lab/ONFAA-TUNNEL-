@@ -19,5 +19,7 @@ data class TunnelProfile(
     val endpoint: String,
     val security: String,
     val outboundJson: String,
-    val incomplete: Boolean = false
+    val incomplete: Boolean = false,
+    val injectMode: InjectMode? = null,
+    val sni: String? = null
 )

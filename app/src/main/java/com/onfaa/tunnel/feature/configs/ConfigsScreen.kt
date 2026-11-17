@@ -2,6 +2,7 @@
 
 package com.onfaa.tunnel.feature.configs
 
+import android.content.ClipboardManager
 import android.content.Context
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -34,6 +35,7 @@ import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FolderOpen
@@ -868,6 +870,7 @@ private fun ImportConfigDialog(
     var importing by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var fileName by remember { mutableStateOf<String?>(null) }
+    var qrScanning by remember { mutableStateOf(false) }
 
     fun import(text: String) {
         if (text.isBlank() || importing) return
@@ -882,6 +885,24 @@ private fun ImportConfigDialog(
                 error = failure.message ?: "Import impossible"
             }
         }
+    }
+
+    fun pasteFromClipboard() {
+        if (importing) return
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+        val text = clipboard?.readPrimaryClip()?.let { clip ->
+            (0 until clip.itemCount).firstNotNullOfOrNull { index ->
+                clip.getItemAt(index)?.coerceToText(context)
+            }
+        }?.toString()?.trim().orEmpty()
+        if (text.isEmpty()) {
+            error = "Le presse-papiers est vide ou ne contient pas de texte."
+            return
+        }
+        // Direct import: the clipboard content is validated immediately and
+        // the field keeps the value so a failure can be corrected in place.
+        link = text
+        import(text)
     }
 
     val filePicker = rememberLauncherForActivityResult(
@@ -931,8 +952,9 @@ private fun ImportConfigDialog(
                 }
             }
             Text(
-                text = "Collez un lien VLESS ou VMess, ou choisissez un fichier texte. " +
-                    "La configuration est validée par le moteur Xray avant l'ajout.",
+                text = "Collez un lien VLESS, VMess, Trojan, Shadowsocks ou SOCKS5, " +
+                    "scannez un QR code ou choisissez un fichier. La configuration est " +
+                    "validée par le moteur Xray avant l'ajout.",
                 style = MaterialTheme.typography.bodySmall,
                 color = palette.textSecondary
             )
@@ -946,7 +968,7 @@ private fun ImportConfigDialog(
                 modifier = Modifier.fillMaxWidth(),
                 minLines = 3,
                 maxLines = 5,
-                label = { Text("Lien VLESS / VMess") },
+                label = { Text("Lien ou configuration Xray") },
                 shape = RoundedCornerShape(14.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = palette.primary,
@@ -983,6 +1005,14 @@ private fun ImportConfigDialog(
             Spacer(modifier = Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TonalButton(
+                    text = "Coller",
+                    icon = Icons.Filled.ContentPaste,
+                    onClick = { pasteFromClipboard() },
+                    enabled = !importing,
+                    compact = true,
+                    modifier = Modifier.weight(1f)
+                )
+                TonalButton(
                     text = "Fichier",
                     icon = Icons.Filled.FolderOpen,
                     onClick = {
@@ -995,10 +1025,10 @@ private fun ImportConfigDialog(
                     modifier = Modifier.weight(1f)
                 )
                 TonalButton(
-                    text = "QR (bientôt)",
+                    text = "QR",
                     icon = Icons.Filled.QrCode2,
-                    onClick = {},
-                    enabled = false,
+                    onClick = { qrScanning = true },
+                    enabled = !importing,
                     compact = true,
                     modifier = Modifier.weight(1f)
                 )
@@ -1011,6 +1041,18 @@ private fun ImportConfigDialog(
                 color = palette.textMuted
             )
         }
+    }
+
+    if (qrScanning) {
+        QrScanDialog(
+            onResult = { text ->
+                qrScanning = false
+                fileName = null
+                link = text
+                import(text)
+            },
+            onDismiss = { qrScanning = false }
+        )
     }
 }
 

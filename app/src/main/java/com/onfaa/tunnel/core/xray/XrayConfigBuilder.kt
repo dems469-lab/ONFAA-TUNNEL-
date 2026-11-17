@@ -1,5 +1,6 @@
 package com.onfaa.tunnel.core.xray
 
+import com.onfaa.tunnel.domain.model.InjectMode
 import com.onfaa.tunnel.domain.model.TunnelProfile
 import com.onfaa.tunnel.domain.model.TunnelProtocol
 import org.json.JSONArray
@@ -25,6 +26,17 @@ object XrayConfigBuilder {
     const val DEFAULT_LOG_LEVEL = "warning"
     val DEFAULT_DNS_ENDPOINTS = listOf("1.1.1.1:53", "8.8.8.8:53")
 
+    /** Transport networks executable by the official Xray-core engine. */
+    val SUPPORTED_TRANSPORTS = setOf("tcp", "ws", "grpc")
+
+    /** Inject modes executable by the official Xray-core engine. */
+    val SUPPORTED_INJECT_MODES = setOf(
+        InjectMode.DIRECT,
+        InjectMode.DIRECT_SNI,
+        InjectMode.PROXY,
+        InjectMode.PROXY_SNI
+    )
+
     private val privateNetworks = listOf(
         "10.0.0.0/8",
         "172.16.0.0/12",
@@ -49,15 +61,51 @@ object XrayConfigBuilder {
         tunFd: Int,
         mtu: Int = DEFAULT_MTU,
         dnsEndpoints: List<String> = DEFAULT_DNS_ENDPOINTS,
-        logLevel: String = DEFAULT_LOG_LEVEL
+        logLevel: String = DEFAULT_LOG_LEVEL,
+        sni: String? = null,
+        injectMode: InjectMode? = null,
+        transport: String? = null
     ): String {
         require(profile.protocol in SUPPORTED_PROTOCOLS) {
             "Unsupported protocol: ${profile.protocol}"
         }
         require(dnsEndpoints.isNotEmpty()) { "At least one DNS endpoint is required" }
+        require(injectMode == null || injectMode in SUPPORTED_INJECT_MODES) {
+            "Mode d'injection non supporté par le moteur Xray : ${injectMode?.label}"
+        }
+        require(transport == null || transport in SUPPORTED_TRANSPORTS) {
+            "Transport réseau non supporté par le moteur Xray : $transport"
+        }
 
         val outbound = JSONObject(profile.outboundJson)
         outbound.put("tag", PROXY_OUTBOUND_TAG)
+
+        val existingStreamSettings = outbound.optJSONObject("streamSettings")
+        val streamSettings = existingStreamSettings ?: JSONObject()
+        var changedStreamSettings = false
+        if (injectMode == InjectMode.DIRECT_SNI || injectMode == InjectMode.PROXY_SNI) {
+            // Xray falls back to the server address as SNI when TLS is used
+            // without an explicit serverName, so mirror that fallback here.
+            val effectiveSni = sni
+                ?: streamSettings.optString("sni").takeIf { it.isNotBlank() }
+                ?: profile.endpoint.substringBeforeLast(":").takeIf { it.isNotBlank() }
+            if (effectiveSni == null) {
+                throw IllegalArgumentException("Le mode ${injectMode.label} requiert un SNI")
+            }
+            if (streamSettings.optString("sni") != effectiveSni) {
+                streamSettings.put("sni", effectiveSni)
+                changedStreamSettings = true
+            }
+        }
+        if (transport != null) {
+            if (streamSettings.optString("network") != transport) {
+                streamSettings.put("network", transport)
+                changedStreamSettings = true
+            }
+        }
+        if (changedStreamSettings) {
+            outbound.put("streamSettings", streamSettings)
+        }
 
         val config = JSONObject()
         config.put("log", JSONObject().put("loglevel", logLevel))
