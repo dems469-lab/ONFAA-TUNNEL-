@@ -2,16 +2,16 @@
 
 ## État de phase
 
-- **Phase actuelle :** 3 — Connexion VPN réelle (`VpnService` ↔ libXray ↔ Xray-core) — **implémentation livrée, validation CI en cours**
-- **État :** l’intégration réelle est codée et poussée sur `main` (`94ea8ba`). Le workflow Phase 3 construit l’AAR officiel, démarre un serveur **Xray-core officiel** épinglé sur le runner, exécute les tests instrumentés E2E (VLESS, VMess, DNS, routage, arrêt propre) puis vérifie les preuves. **Aucun résultat E2E ne doit être annoncé avant la réussite de ce run.**
+- **Phase actuelle :** 3 — Connexion VPN réelle (`VpnService` ↔ libXray ↔ Xray-core) — **terminée et validée en CI (émulateur x86_64)**
+- **État :** le tunnel réel fonctionne de bout en bout en CI. Le run [#44004893595](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44004893595) (commit `5f51831`) est **vert : 25/25 étapes**, 21/21 tests instrumentés, VLESS et VMess avec sonde HTTP 200 réelle, DNS `onfaa.test` → `192.0.2.10` via le tunnel, journal d’accès du serveur Xray officiel. Deux limites restent **non revendiquées** : appareil physique ARM64 et changement d’IP publique.
 - **Phase 2B :** terminée et validée (AAR officiel, API native, 6/6 tests instrumentés) ; preuves conservées ci-dessous.
 
 ## Références dépôt
 
 - **Dépôt :** https://github.com/dems469-lab/ONFAA-TUNNEL-
 - **Branche principale :** `main`
-- **Commit Phase 3 (code) :** `94ea8ba745467490b3e4f9c831392806258bafe7`
-- **Run CI Phase 3 :** [libXray Android build and real VPN E2E #43978101438](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/43978101438)
+- **Commit Phase 3 (code) :** `5f518313082fc095eeb118553b6fd969318cddfd`
+- **Run CI Phase 3 réussi :** [libXray Android build and real VPN E2E #44004893595](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44004893595) — `success`, 25/25 étapes
 - **Dernier commit Phase 2B validé :** `f116442021b4e80508e3ef2448d21980f2207534`
 - **Run Phase 2B réussi :** [#43965698249](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/43965698249)
 
@@ -48,23 +48,31 @@
 
 ### UI
 
-- `HomeScreen` : connexion/déconnexion réelles, demande de consentement VPN, état réel, erreurs réelles.
-- `ConfigsScreen` : import réel, validation par le moteur, sélection/suppression, note « mémoire uniquement ».
-- `LogsScreen` : événements réels du cycle de vie, assainis.
-- `StatsScreen` : informations de connexion réelles, **aucun compteur simulé**.
+- `HomeScreen` : connexion/déconnexion réelles, demande de consentement VPN, état réel, erreurs réelles, durée de session et trafic réel `TrafficStats`.
+- `ConfigsScreen` : import réel, validation par le moteur, sélection/suppression, favoris, latence TCP réelle, tri et détail.
+- `LogsScreen` : événements réels du cycle de vie, assainis, filtres/recherche/copie/partage et diagnostic basé uniquement sur l’état réel.
+- `StatsScreen` : conservé dans le code mais retiré de la navigation principale ; les métriques réelles sont intégrées à l’accueil.
+- **Phase 5 UI** : 4 onglets (Connexion, Configs, Paramètres, Journaux), sous-écrans de paramètres, Apparence, 7 palettes × 3 modes, composants réutilisables et charte `docs/design/DESIGN_SPEC.md`. Les 5 références fournies sont classées dans `docs/design/reference/` (0 non identifiée) ; **aucune référence d’accueil n’a été fournie**, donc l’accueil est documenté comme reconstruit.
+- Les options de paramètres non raccordées au moteur sont persistées mais explicitement signalées comme UI-only ; aucun effet n’est simulé.
 
-## Vérifications Phase 3 (à confirmer par le run CI)
+## Preuves Phase 3 (run CI réussi `44004893595`)
 
-Le workflow Phase 3 doit prouver, sur émulateur x86_64 API 35 :
+Prouvé sur émulateur **x86_64 API 35**, avec l’AAR officiel et le serveur
+**Xray-core 26.11.9** officiel construits depuis les commits épinglés :
 
-1. **Échec direct avant connexion** : requête vers `onfaa.test`/`192.0.2.10:18080` impossible.
-2. **Tunnel VLESS réel** : `runXray` actif, sonde HTTP 200 à travers le tunnel.
-3. **Tunnel VMess réel** : idem avec le second inbound.
-4. **DNS réel** : `onfaa.test` résolu en `192.0.2.10` via le DNS du tunnel.
-5. **Routage réel** : requête par nom et par IP vers une adresse TEST-NET uniquement joignable derrière le serveur Xray local.
-6. **Arrêt propre** : état `Idle`, `getXrayState=false`, trafic direct de nouveau en échec.
-7. **Serveur injoignable** : jamais d’état `Connected` ; erreur réelle publiée.
-8. **Permission VPN** : consentement requis, connexion refusée proprement sans consentement.
+1. **Échec direct avant connexion** ✔ — requête vers `onfaa.test`/`192.0.2.10:18080` en échec hors tunnel (assertion `assertDirectTrafficFails`).
+2. **Tunnel VLESS réel** ✔ — `Connected` seulement après sonde HTTP `200 — onfaa-e2e-token-phase3` ; `tun-in >> proxy` puis `proxy/vless/outbound: tunneling request`.
+3. **Tunnel VMess réel** ✔ — même chaîne avec `proxy/vmess/outbound` et l’inbound VMess.
+4. **DNS réel** ✔ — `onfaa.test` → `192.0.2.10` via le DNS du tunnel (`tun-in -> dns-out`, résolveur `TCPL//10.0.2.2:15353`).
+5. **Routage réel** ✔ — HTTP 200 + token par IP et par nom vers une adresse TEST-NET uniquement joignable derrière le serveur Xray local ; journal d’accès `3 × vless-in -> token-redirect` et `3 × vmess-in -> token-redirect`.
+6. **Arrêt propre** ✔ — état `Idle`, `getXrayState=false`, trafic direct de nouveau en échec.
+7. **Serveur injoignable** ✔ — 6/6 sondes en échec, jamais `Connected`, erreur réelle publiée.
+8. **Permission VPN** ✔ — consentement requis, connexion refusée proprement sans consentement, moteur arrêté.
+
+Totaux du run : **11/11 tests unitaires**, **21/21 tests instrumentés**
+(0 échec, 0 erreur, 0 ignoré), portes de preuve `E2E_XML_VALIDATED`,
+`ACCESS_LOG_PROVES_TUNNEL_DESTINATION`, `ACCESS_LOG_PER_PROTOCOL_OK vless=3 vmess=3`,
+aucun `SERVER_BLOCKED_TUNNEL_TARGET`. Détail et extraits : `docs/PHASE_3_REPORT.md` §9.
 
 ## Preuves Phase 2B (conservées)
 
@@ -79,20 +87,23 @@ Le workflow Phase 3 doit prouver, sur émulateur x86_64 API 35 :
 - **Changement d’IP publique : non démontrable en CI** (le runner et l’émulateur partagent la même sortie réseau). Protocole manuel documenté ; aucune affirmation d’IP publique changée n’est faite.
 - Profils en mémoire uniquement (pas de persistance chiffrée).
 - Liens VMess base64 historiques refusés (libXray v26.11.9 ne les convertit pas) ; les liens VMess URL `vmess://UUID@hôte:port?...` sont supportés.
-- Compteurs de trafic non collectés (aucune statistique simulée).
-- Le run CI complet dépend de GitHub Actions (pas de JDK/Go/Android SDK local sur le téléphone).
+- Trafic mesuré par `android.net.TrafficStats` pour l’UID applicatif (sockets du moteur inclus), pas par un compteur noyau du TUN ; les valeurs sont réelles ou « indisponible ».
+- Options moteur de la Phase 5 (fragmentation, ad block, gaming, hotspot, routage choisi, DNS choisi, MTU, mux, niveau de log, reconnexion automatique) persistées mais **non raccordées** ; l’UI l’indique explicitement.
+- Aucune détection de fuite DNS/IP n’est implémentée : l’UI affiche « non testées » et ne reprend pas l’affirmation « aucune fuite » de la maquette.
+- Le run CI complet dépend de GitHub Actions (pas de JDK/Go/Android SDK local sur le téléphone) ; **la compilation des changements UI Phase 5 n’a pas encore été vérifiée localement**.
 
 ## Blocages / risques
 
-- Validation finale conditionnée à la réussite du run `43978101438` (build AAR + serveur Xray + émulateur).
+- **Aucun blocage CI** : le run `44004893595` est vert. Les deux seules limites ouvertes sont matérielles/environnementales (ARM64 physique, IP publique) et documentées ci-dessus.
 - Si l’émulateur ne peut pas joindre `10.0.2.2`, le test E2E échouera explicitement (aucun succès simulé).
 - Un seul runtime Go par processus : ne pas ajouter d’autre bibliothèque Go.
+- Contrôleur de protection de sockets : Xray empile les contrôleurs sans pouvoir les retirer, donc **un seul enregistrement par processus** (délégué `AtomicReference`). Ne jamais enregistrer un contrôleur qui refuse.
 
 ## Prochaine tâche
 
-1. Suivre le run `43978101438`, corriger toute erreur de compilation/test, puis consigner les preuves réelles (statut, journal d’accès Xray, résultats instrumentés, APK).
-2. Exécuter le protocole ARM64 sur un appareil physique dès qu’il est disponible.
-3. Passer à la persistance chiffrée des profils (phase suivante) sans régresser l’intégration réelle.
+1. Exécuter le protocole ARM64 sur un appareil physique dès qu’il est disponible (protocole `docs/PHASE_3_REPORT.md` §11) ; ne pas revendiquer avant.
+2. Faire valider en CI la compilation des changements UI Phase 5 (thèmes, navigation, sous-écrans, journaux) avant toute revendication de livraison.
+3. Passer à la persistance chiffrée des profils (phase suivante) sans régresser l’intégration réelle validée.
 
 ## Instructions de reprise pour une autre IA
 

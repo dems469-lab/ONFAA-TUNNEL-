@@ -6,7 +6,16 @@ Le format s’inspire de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/
 
 ## [Unreleased]
 
-### Phase 3 — connexion VPN réelle via libXray/Xray-core (implémentation livrée, validation CI en cours)
+### Phase 5 — UI/UX, thèmes et références visuelles (implémentation livrée, compilation non vérifiée localement)
+- **Références** : 5 images analysées individuellement et classées sans modification dans `docs/design/reference/` (`logs`, `appearance`, `servers`, `settings`) ; **5 classées, 0 non identifiée**. Les images livrées en `.png` sont des JPEG ; hashes et dimensions consignés. Aucune référence d’accueil n’a été fournie : l’accueil est documenté comme reconstruit.
+- **Thèmes** : 7 palettes (ONFAA, Aurora, Ember, Graphite, Orchid, Paper, Matcha) × 3 modes (Système, Clair, Sombre), persistés avec DataStore et appliqués à toute l’application. « Dark/Light » est traité comme le mode d’affichage, pas comme une huitième palette.
+- **Design system** : tokens de couleurs, typographie, dimensions, formes, composants réutilisables (fonds, logo, en-têtes, cartes, boutons, chips, badges, lignes de réglage, barre inférieure, orbe, graphique de trafic, journaux, diagnostics, aperçus de thème). Charte complète dans `docs/design/DESIGN_SPEC.md` (lien racine `DESIGN_SPEC.md`).
+- **Navigation** : 4 onglets (Connexion, Configs, Paramètres, Journaux), sous-écrans de paramètres et Apparence. L’incohérence des références (3 ou 4 onglets) est documentée.
+- **Écrans** : accueil réel (consentement VPN, états, durée, trafic `TrafficStats`), Configs (recherche, filtres, tri, favoris, latence TCP réelle, import lien/fichier, détail, suppression), Paramètres (groupes, recherche, sous-pages), Apparence, Journaux (filtres, recherche, copie, effacement, export texte, diagnostic réel).
+- **Honnêteté des données** : aucune connexion, statistique ou fuite simulée ; la mention « aucune fuite » de la maquette est remplacée par « non testées » ; les options moteur non raccordées sont persistées mais signalées comme UI-only.
+- **Limites** : compilation/tests UI non exécutés localement (pas de JDK/SDK Android) ; validation CI à faire ; accueil sans référence ; QR import non implémenté ; profils en mémoire uniquement ; textes français codés en dur.
+
+### Phase 3 — connexion VPN réelle via libXray/Xray-core (TERMINÉE, validée en CI sur émulateur x86_64)
 - `OnfaaTunnelVpnService` réel : TUN IPv4/IPv6, routes par défaut, DNS, foreground service, consentement VPN, cycle de vie complet (connexion, vérification, arrêt, révocation, destruction).
 - Pont moteur étendu (`XrayBridge`) : conversion réelle des liens, `testXray`, `runXray`, `stopXray`, `getXrayState`, protection des sockets via `VpnService.protect`, `setDNS`/`resetDNS`, appels hors thread UI.
 - Contrat TUN réel Xray-core v26.11.9 : descripteur passé dans `env["xray.tun.fd"]` ; routage DNS/privé/proxy construit par `XrayConfigBuilder`.
@@ -14,8 +23,13 @@ Le format s’inspire de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/
 - UI branchée sur l’état réel : connexion/déconnexion, import/validation, journaux réels, aucune statistique fictive.
 - Tests : unitaires (assainissement, validation d’import), instrumentés moteur (conversion, config TUN, fd invalide, idempotence) et E2E réel (serveur Xray-core officiel local, VLESS, VMess, DNS, routage, arrêt, serveur injoignable, permission VPN).
 - Workflow `libxray-poc.yml` étendu : build du serveur Xray-core épinglé, services E2E déterministes (token HTTP sur TEST-NET + DNS `onfaa.test`), arguments d’instrumentation, vérification des preuves et du journal d’accès, artefacts.
-- **Limites** : appareil physique ARM64 non disponible ; changement d’IP publique non démontrable en CI ; profils en mémoire uniquement ; statistiques de trafic non collectées.
-- **Validation** : run [#43978101438](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/43978101438) — résultat à confirmer.
+- **Défauts réels corrigés pendant la validation** :
+  - contrôleur de protection des sockets enregistré **une seule fois par processus** derrière un délégué `AtomicReference` : Xray empile les contrôleurs (`RegisterDialerController`) sans pouvoir les retirer, et l’ancien `clearSocketProtector()` laissait un contrôleur `{ false }` actif qui rejetait tous les dials du processus (`failed to apply external controller`) — VLESS et VMess, y compris après reconnexion ;
+  - fixture serveur : `finalRules` explicite `allow` pour la cible de `redirect` `127.0.0.1:18080`, car Xray 26.x applique `defaultBlockPrivateRule` aux inbounds VLESS/VMess (sinon `target blocked by a finalrule` / blackhole) ;
+  - fixture VLESS clair déplacée sur adresse LAN (`xray` refuse VLESS sans TLS vers une IP publique) et ajout d’un test de conversion VLESS public **avec TLS** ;
+  - porte de preuve durcie : échec si le serveur journalise un blackhole, et exigence d’au moins une ligne d’accès par protocole.
+- **Limites** : appareil physique ARM64 non disponible ; changement d’IP publique non démontrable en CI ; profils en mémoire uniquement. Le trafic est mesuré via `android.net.TrafficStats` (UID applicatif) depuis la Phase 5, pas par un compteur noyau du TUN.
+- **Validation** : run [#44004893595](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44004893595) `success` (commit `5f51831`, 25/25 étapes) — **11/11 tests unitaires**, **21/21 tests instrumentés** (0 échec/erreur/ignoré), E2E VLESS et VMess avec sonde HTTP 200, DNS `onfaa.test` → `192.0.2.10`, journal d’accès `3 × vless-in -> token-redirect` + `3 × vmess-in -> token-redirect`, aucun blackhole serveur. APK debug `arm64-v8a/armeabi-v7a/x86/x86_64` publié.
 
 ### Phase 2 — audit et intégration libXray officielle (TERMINÉE, validée en CI)
 - Audit des sources officielles XTLS/Xray-core v26.11.9 (commit `676eaf66…`, MPL-2.0) et XTLS/libXray v26.11.9 (commit `5a0f7d8…`, MIT), alignement de dépendance vérifié.

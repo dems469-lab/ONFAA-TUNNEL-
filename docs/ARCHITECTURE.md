@@ -19,17 +19,18 @@
 - **Preuves** : compilation `:app` avec AAR, tests unitaires et **tests instrumentés réels réussis sur émulateur x86_64 API 35** (`invoke`, `xrayVersion`, erreurs) — voir `docs/LIBXRAY_ANDROID_POC.md`.
 - **Toujours absent** : établissement du tunnel VPN (`VpnService`/TUN), routage, états de connexion, statistiques (Phase 3+).
 
-## État Phase 3 (tunnel réel implémenté, validation CI en cours)
+## État Phase 3 (tunnel réel validé en CI, émulateur x86_64)
 
 - **Service VPN réel** : `OnfaaTunnelVpnService` établit un TUN Android (IPv4 `10.10.0.2/24`, IPv6 `fd00::2/64`, routes par défaut, DNS `10.10.0.1`/`fd00::1`, MTU 1500), se déclare au premier plan et pilote le moteur.
 - **Chaîne réelle** : `MainActivity`/Compose → `TunnelConfigRepository`/`TunnelStatusRepository` → `OnfaaTunnelVpnService` → `XrayBridge` → `libXray.LibXray#invoke` / `setDNS` / `registerDialerController` → **Xray-core officiel**.
 - **Contrat TUN** : le descripteur du `VpnService` est transmis au moteur via `env["xray.tun.fd"]` (Xray-core v26.11.9 ; libXray n’expose plus `SetTunFd`). Le service Android possède adresses/routes/DNS ; l’inbound `tun` lit le descripteur.
-- **Protection des sockets** : les sockets du moteur sont protégés par `VpnService.protect(fd)` via un `DialerController` réel, pour éviter la boucle VPN. `setDNS`/`resetDNS` configurent le résolveur Go utilisé par libXray.
+- **Protection des sockets** : les sockets du moteur sont protégés par `VpnService.protect(fd)` via un `DialerController` réel, pour éviter la boucle VPN. `setDNS`/`resetDNS` configurent le résolveur Go utilisé par libXray. Xray-core **empile** les contrôleurs de dial (`transport/internet.RegisterDialerController` n’a pas de désinscription et tout dial doit satisfaire tous les contrôleurs) : le pont enregistre donc **un seul** contrôleur par processus, derrière un délégué `AtomicReference` que le service remplace à la connexion et vide à l’arrêt. Un second enregistrement, même temporairement refusant, casserait tous les dials du processus.
 - **Configuration** : lien VLESS/VMess → `convertShareLinksToXrayJson` (libXray) → outbound réel → configuration TUN complète (`XrayConfigBuilder`) → `testXray` → `runXray`.
 - **DNS/routage** : port 53 issu du TUN → `dns-out` ; requêtes DNS internes → sortie directe ; réseaux privés → direct ; trafic restant → proxy.
 - **États** : `Idle`/`Connecting`/`Verifying`/`Connected`/`Disconnecting`/`Error`. `Connected` exige `runXray` réussi, `getXrayState=true` et une **sonde HTTP réelle** à travers le tunnel.
 - **Arrêt** : `stopXray` → `resetDNS` → neutralisation du protector → fermeture du TUN → arrêt du foreground → `stopSelf` ; gestion de `onRevoke`/`onDestroy`.
 - **Import** : validation réelle par le moteur, erreurs précises, secrets masqués ; profils en mémoire uniquement (persistance chiffrée en phase suivante).
+- **Validation CI** : run `44004893595` — 21/21 tests instrumentés, E2E VLESS et VMess avec sonde HTTP 200 à travers le TUN, DNS via `dns-out`, journal d’accès serveur par protocole. Fixture : Xray-core officiel épinglé, inbounds loopback VLESS/VMess, token sur `192.0.2.10:18080` via `freedom` `redirect` (avec `finalRules` `allow` explicite, car Xray 26.x bloque par défaut les destinations privées pour ces inbounds).
 - **Limite** : validation native prouvée sur émulateur x86_64 ; appareil physique ARM64 à exécuter.
 
 ## Vue d’ensemble

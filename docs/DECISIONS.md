@@ -59,6 +59,16 @@ Ce document consigne les décisions prises, les hypothèses de travail et les ch
 | 2026-11-16 | Trafic HTTP en clair autorisé uniquement en variant `debug` pour la fixture ; release en TLS strict | La fixture E2E est hors production ; le build release reste durci |
 | 2026-11-16 | Aucune statistique de trafic affichée tant qu’aucune source réelle n’est branchée | Pas de compteurs simulés |
 
+## Décisions validées (Phase 3 — validation CI)
+
+| Date | Décision | Raison / portée |
+| --- | --- | --- |
+| 2026-11-17 | Contrôleur de protection des sockets enregistré **une seule fois par processus**, derrière un délégué `AtomicReference` ; `clearSocketProtector()` ne fait que vider le délégué | `transport/internet.RegisterDialerController` **empile** dans `internet.Controllers` et tout dial doit satisfaire **tous** les contrôleurs ; il n’existe pas de désinscription. Un contrôleur `{ false }` laissé par un test rejetait tous les dials du processus (run `43995354053`, `failed to apply external controller`), VLESS et VMess identiquement, y compris après reconnexion en production |
+| 2026-11-17 | Fixture E2E : `finalRules` `allow` (`tcp`, `127.0.0.1:$E2E_HTTP_PORT`) sur l’outbound `freedom` avec `redirect` | Xray 26.x applique `defaultBlockPrivateRule` aux inbounds VLESS/VMess ; la cible `127.0.0.1` du `redirect` était blackholée (`target blocked by a finalrule`, run `43999172035`) alors que le tunnel et le journal d’accès étaient corrects |
+| 2026-11-17 | Fixture VLESS en clair sur adresse LAN (`192.168.1.10`) et test dédié `convertsPublicVlessTlsShareLinkWithEngine` | Xray refuse un outbound VLESS sans TLS vers une IP publique (`requiresTransportSecurity`) ; ce n’était pas un défaut de l’application (run `43995354053`) |
+| 2026-11-17 | Portes de preuve CI durcies : échec si `target blocked by a finalrule` dans le journal serveur, ≥1 ligne d’accès par protocole, 4 tests E2E exigés | Un journal d’accès peut prouver la destination **sans** prouver la réponse HTTP ; ne jamais déclarer un tunnel réussi sur une sonde expirée |
+| 2026-11-17 | Validation Phase 3 prononcée sur le run `44004893595` (commit `5f51831`) : 21/21 instrumentés, VLESS+VMess, DNS, arrêt propre | Preuves réelles uniquement. **Non revendiqué** : appareil physique ARM64 et changement d’IP publique (protocoles manuels documentés) |
+
 ## Choix techniques à confirmer / à compléter
 
 | Sujet | Questions ouvertes | Phase cible |

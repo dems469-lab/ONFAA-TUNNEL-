@@ -22,7 +22,7 @@ La roadmap est organisée en dix phases. Chaque phase doit être documentée, va
 ## Phase 3 — Connexion VPN réelle
 - **Objectif :** établir une connexion VPN réelle via `VpnService` et le moteur Xray intégré.
 - **Livrables attendus :** cycle de vie de connexion/arrêt, gestion d’erreurs, état fiable, preuves de fonctionnement réel (tests manuels/procédure documentée).
-- **État :** **implémentation livrée, validation CI en cours** — TUN réel + `libXray`, import/validation VLESS/VMess réels, états réels, tests E2E avec serveur Xray-core officiel local (VLESS, VMess, DNS, routage, arrêt), workflow de preuve. Voir `docs/PHASE_3_REPORT.md` et le run `43978101438`. Reste à confirmer par la CI et à exécuter sur appareil physique ARM64.
+- **État :** **terminée et validée en CI (émulateur x86_64)** — TUN réel + `libXray`, import/validation VLESS/VMess réels, états réels, tests E2E avec serveur Xray-core officiel local (VLESS, VMess, DNS, routage, arrêt), workflow de preuve. Run [#44004893595](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44004893595) `success` : 11/11 unitaires, 21/21 instrumentés, sonde HTTP réelle et journal d’accès par protocole. Voir `docs/PHASE_3_REPORT.md`. **Non revendiqué** : exécution sur appareil physique ARM64 (protocole fourni) et changement d’IP publique (non démontrable en CI).
 
 ## Phase 4 — Importation et gestion des configurations
 - **Objectif :** persister et gérer des configurations personnelles (VLESS, VMess) de façon sécurisée.
