@@ -181,23 +181,8 @@ fun HomeScreen(
                     }
                 }
             )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = statusHeadline(state),
-                style = MaterialTheme.typography.headlineSmall,
-                color = if (state is TunnelState.Error) palette.danger else palette.textPrimary
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = statusSupport(state, selected),
-                style = MaterialTheme.typography.bodySmall,
-                color = palette.textSecondary,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
             if (connectedState != null) {
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(10.dp))
                 Row(
                     modifier = Modifier
                         .background(palette.success.copy(alpha = 0.10f), RoundedCornerShape(99.dp))
@@ -292,14 +277,6 @@ fun HomeScreen(
                             text = selected.displayName,
                             style = MaterialTheme.typography.titleSmall,
                             color = palette.textPrimary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                            text = selected.endpoint,
-                            style = MaterialTheme.typography.bodySmall,
-                            fontFamily = FontFamily.Monospace,
-                            color = palette.textSecondary,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -463,37 +440,6 @@ private fun TrafficStat(
             )
         }
     }
-}
-
-private fun statusHeadline(state: TunnelState): String = when (state) {
-    TunnelState.Idle -> "Déconnecté"
-    TunnelState.AwaitingPermission -> "Autorisation demandée…"
-    TunnelState.Preparing -> "Préparation…"
-    TunnelState.Connecting -> "Connexion en cours…"
-    TunnelState.Verifying -> "Vérification du tunnel…"
-    is TunnelState.Connected -> "Connecté"
-    is TunnelState.Reconnecting -> "Reconnexion…"
-    TunnelState.Disconnecting -> "Déconnexion…"
-    is TunnelState.Error -> "Erreur de connexion"
-}
-
-private fun statusSupport(state: TunnelState, selected: TunnelProfile?): String = when (state) {
-    TunnelState.Idle -> selected?.let {
-        if (it.incomplete) {
-            "Profil « ${it.displayName} » migré sans identifiant : réimportez son lien."
-        } else {
-            "Prêt à protéger votre connexion via ${it.displayName}."
-        }
-    } ?: "Importez une configuration (VLESS, VMess, Trojan, Shadowsocks, SOCKS5) pour démarrer."
-    TunnelState.AwaitingPermission -> "Android demande l'autorisation d'établir le VPN."
-    TunnelState.Preparing -> "Validation du profil et préparation de l'interface TUN."
-    TunnelState.Connecting -> "Démarrage du moteur Xray et de l'interface TUN."
-    TunnelState.Verifying -> "Le moteur est actif ; une sonde réelle vérifie le trafic."
-    is TunnelState.Connected -> "${state.profileName} · ${state.protocol.label}"
-    is TunnelState.Reconnecting ->
-        "Réseau perdu (tentative ${state.attempt}) : le tunnel sera revalidé dès le retour du réseau."
-    TunnelState.Disconnecting -> "Arrêt du moteur et fermeture du TUN."
-    is TunnelState.Error -> state.message
 }
 
 private fun startTunnel(context: Context) {
