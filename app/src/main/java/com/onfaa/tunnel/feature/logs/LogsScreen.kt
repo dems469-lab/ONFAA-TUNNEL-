@@ -165,7 +165,7 @@ fun LogsScreen(onBack: () -> Unit) {
     }
 
     fun shareReport() {
-        val report = buildReport(state, checks, selected?.protocol?.name, events, visibleEvents)
+        val report = buildReport(state, checks, selected?.protocol?.label, events, visibleEvents)
         shareText(context, "Rapport ONFAA TUNNEL", report)
     }
 

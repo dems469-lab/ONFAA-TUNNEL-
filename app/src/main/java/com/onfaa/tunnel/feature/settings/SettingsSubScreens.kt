@@ -758,8 +758,9 @@ fun DiagnosticsSettingsScreen(
                 )
                 Spacer(modifier = Modifier.width(10.dp))
                 Column(modifier = Modifier.weight(1f)) {
+                    val current = state
                     Text(
-                        text = when (state) {
+                        text = when (current) {
                             TunnelState.Idle -> "Aucun tunnel actif"
                             TunnelState.AwaitingPermission -> "Autorisation VPN demandée"
                             TunnelState.Preparing -> "Préparation du tunnel"
@@ -767,7 +768,7 @@ fun DiagnosticsSettingsScreen(
                             TunnelState.Verifying -> "Vérification du tunnel"
                             is TunnelState.Connected -> "Tunnel connecté"
                             is TunnelState.Reconnecting ->
-                                "Reconnexion (tentative ${state.attempt})"
+                                "Reconnexion (tentative ${current.attempt})"
                             TunnelState.Disconnecting -> "Déconnexion"
                             is TunnelState.Error -> "Erreur réelle publiée"
                         },
