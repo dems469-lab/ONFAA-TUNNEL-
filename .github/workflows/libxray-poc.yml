@@ -218,6 +218,16 @@ jobs:
             --answer-ip "$E2E_ANSWER_IP" --token "$E2E_TOKEN" \
             > "$E2E_DIR/services.log" 2>&1 &
           echo $! > "$E2E_DIR/services.pid"
+          # Trojan links always negotiate TLS (libXray forces it for the scheme);
+          # Xray 26 removed allowInsecure, so the client pins the self-signed
+          # certificate through the link's pcs parameter instead of trusting a CA.
+          openssl req -x509 -newkey rsa:2048 -nodes -days 2 \
+            -keyout "$E2E_DIR/trojan.key" -out "$E2E_DIR/trojan.crt" \
+            -subj "/CN=onfaa.test" -addext "subjectAltName=DNS:onfaa.test" \
+            >/dev/null 2>&1
+          openssl x509 -in "$E2E_DIR/trojan.crt" -outform DER \
+            | sha256sum | awk '{print $1}' > "$E2E_DIR/pcs.txt"
+          test -s "$E2E_DIR/pcs.txt"
           cat > "$E2E_DIR/server.json" <<EOF
           {
             "log": {"loglevel": "info", "access": "$E2E_DIR/access.log"},
@@ -248,6 +258,17 @@ jobs:
                 "protocol": "trojan",
                 "settings": {
                   "clients": [{"password": "$E2E_TROJAN_PASSWORD"}]
+                },
+                "streamSettings": {
+                  "security": "tls",
+                  "tlsSettings": {
+                    "certificates": [
+                      {
+                        "certificateFile": "$E2E_DIR/trojan.crt",
+                        "keyFile": "$E2E_DIR/trojan.key"
+                      }
+                    ]
+                  }
                 }
               },
               {
@@ -470,7 +491,7 @@ jobs:
             # The runner executes every line in its own /bin/sh, so this command
             # must stay on a single line (a trailing backslash would be passed
             # to Gradle as a literal argument).
-            ./gradlew :app:connectedDebugAndroidTest --stacktrace -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e=true -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.uuid="$E2E_UUID" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.host="10.0.2.2" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.vlessPort="$E2E_VLESS_PORT" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.vmessPort="$E2E_VMESS_PORT" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.trojanPort="$E2E_TROJAN_PORT" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.trojanPassword="$E2E_TROJAN_PASSWORD" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.ssPort="$E2E_SS_PORT" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.ssMethod="$E2E_SS_METHOD" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.ssPassword="$E2E_SS_PASSWORD" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.dns="tcp+local://10.0.2.2:$E2E_DNS_PORT" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.probeUrl="http://$E2E_ANSWER_IP:$E2E_HTTP_PORT/token" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.token="$E2E_TOKEN"
+            ./gradlew :app:connectedDebugAndroidTest --stacktrace -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e=true -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.uuid="$E2E_UUID" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.host="10.0.2.2" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.vlessPort="$E2E_VLESS_PORT" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.vmessPort="$E2E_VMESS_PORT" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.trojanPort="$E2E_TROJAN_PORT" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.trojanPassword="$E2E_TROJAN_PASSWORD" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.trojanPcs="$(cat "$E2E_DIR/pcs.txt")" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.ssPort="$E2E_SS_PORT" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.ssMethod="$E2E_SS_METHOD" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.ssPassword="$E2E_SS_PASSWORD" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.dns="tcp+local://10.0.2.2:$E2E_DNS_PORT" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.probeUrl="http://$E2E_ANSWER_IP:$E2E_HTTP_PORT/token" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.token="$E2E_TOKEN"
 
       - name: Publish instrumented test results to job summary
         # Run after a test failure (we need its XML), but do not fabricate a

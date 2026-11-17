@@ -31,7 +31,7 @@ import java.net.URL
  * the pinned commit on the CI host. Requires instrumentation arguments:
  *   onfaa.e2e=true
  *   onfaa.e2e.uuid, onfaa.e2e.host, onfaa.e2e.vlessPort, onfaa.e2e.vmessPort
- *   onfaa.e2e.trojanPort, onfaa.e2e.trojanPassword
+ *   onfaa.e2e.trojanPort, onfaa.e2e.trojanPassword, onfaa.e2e.trojanPcs
  *   onfaa.e2e.ssPort, onfaa.e2e.ssMethod, onfaa.e2e.ssPassword
  *   onfaa.e2e.dns, onfaa.e2e.probeUrl, onfaa.e2e.token
  *
@@ -54,6 +54,7 @@ class VpnTunnelE2ETest {
     private val vmessPort get() = args.getString("onfaa.e2e.vmessPort") ?: "18444"
     private val trojanPort get() = args.getString("onfaa.e2e.trojanPort") ?: "18445"
     private val trojanPassword get() = args.getString("onfaa.e2e.trojanPassword").orEmpty()
+    private val trojanPcs get() = args.getString("onfaa.e2e.trojanPcs").orEmpty()
     private val ssPort get() = args.getString("onfaa.e2e.ssPort") ?: "18446"
     private val ssMethod get() = args.getString("onfaa.e2e.ssMethod") ?: "aes-256-gcm"
     private val ssPassword get() = args.getString("onfaa.e2e.ssPassword").orEmpty()
@@ -198,12 +199,14 @@ class VpnTunnelE2ETest {
         "vmess://$uuid@$host:$vmessPort?encryption=auto&security=none&type=tcp#CI%20VMess"
 
     /**
-     * CI fixture runs the Trojan inbound without TLS: Xray's Trojan inbound
-     * does not require TLS, and the TLS transport itself is already covered by
-     * the VLESS TLS conversion tests. Real users keep security=tls in links.
+     * Trojan links always negotiate TLS (libXray forces it for the scheme).
+     * The fixture certificate is self-signed and Xray 26 removed
+     * allowInsecure, so the link pins the certificate SHA-256 (hex) through the
+     * pcs parameter, exactly as a real share link would.
      */
     private fun trojanLink(): String =
-        "trojan://$trojanPassword@$host:$trojanPort?security=none&type=tcp#CI%20Trojan"
+        "trojan://$trojanPassword@$host:$trojanPort" +
+            "?security=tls&sni=onfaa.test&pcs=$trojanPcs&type=tcp#CI%20Trojan"
 
     /**
      * SIP002 Shadowsocks link: URL-safe base64 userinfo carrying
