@@ -79,7 +79,7 @@ fun ConfigsScreen() {
             )
             importing = false
             result.onSuccess { profile ->
-                message = "Profil « ${profile.displayName} » (${profile.protocol.name}) validé et enregistré"
+                message = "Profil « ${profile.displayName} » (${profile.protocol.label}) validé et enregistré"
                 link = ""
                 profileName = ""
             }.onFailure { failure ->
@@ -127,7 +127,8 @@ fun ConfigsScreen() {
         Text(text = "Configurations", style = MaterialTheme.typography.headlineSmall)
         Spacer(modifier = Modifier.height(4.dp))
         Text(
-            text = "Import d'un lien vless:// ou vmess://, du presse-papiers, d'un fichier ou " +
+            text = "Import d'un lien vless://, vmess://, trojan://, ss:// ou socks://, " +
+                    "du presse-papiers, d'un fichier ou " +
                 "d'une configuration Xray JSON. Chaque profil est validé par le moteur Xray, " +
                 "chiffré (AES-GCM, clé Android Keystore) puis enregistré dans Room.",
             style = MaterialTheme.typography.bodySmall
@@ -141,7 +142,7 @@ fun ConfigsScreen() {
                 error = null
                 message = null
             },
-            label = { Text("Lien VLESS / VMess ou JSON Xray") },
+            label = { Text("Lien ou JSON Xray") },
             singleLine = false,
             minLines = 2,
             maxLines = 4,
@@ -323,7 +324,7 @@ private fun ProfileRow(
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    text = "${profile.protocol.name} — ${profile.endpoint} — sécurité ${profile.security}",
+                    text = "${profile.protocol.label} — ${profile.endpoint} — sécurité ${profile.security}",
                     style = MaterialTheme.typography.bodySmall,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis

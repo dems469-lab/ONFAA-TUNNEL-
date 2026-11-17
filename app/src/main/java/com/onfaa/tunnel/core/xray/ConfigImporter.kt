@@ -12,12 +12,12 @@ import org.json.JSONObject
 class ConfigException(message: String) : Exception(message)
 
 /**
- * Real VLESS/VMess import.
+ * Real Xray outbound import (VLESS, VMess, Trojan, Shadowsocks, SOCKS5).
  *
  * Accepted inputs:
- *  - share link vless:// / vmess:// (converted by libXray
- *    convertShareLinksToXrayJson, then validated by the real engine),
- *  - Xray JSON client configuration (or a single VLESS/VMess outbound object).
+ *  - share link vless:// / vmess:// / trojan:// / ss:// / socks:// (converted
+ *    by libXray convertShareLinksToXrayJson, then validated by the real engine),
+ *  - Xray JSON client configuration (or a single supported outbound object).
  *
  * Every accepted profile is embedded in the full TUN configuration and checked
  * with testXray (constructs handlers, never starts the TUN) before it is
@@ -26,6 +26,10 @@ class ConfigException(message: String) : Exception(message)
  * readable error. Raw inputs are never logged.
  */
 object ConfigImporter {
+
+    private val SUPPORTED_LINK_SCHEMES = setOf("vless", "vmess", "trojan", "ss", "socks")
+    private val SUPPORTED_OUTBOUND_PROTOCOLS =
+        setOf("vless", "vmess", "trojan", "shadowsocks", "socks")
 
     suspend fun importLink(rawLink: String, name: String? = null): Result<TunnelProfile> =
         runImport { importLinkOrThrow(rawLink, name) }
@@ -62,8 +66,11 @@ object ConfigImporter {
         val link = rawLink.trim()
         if (link.isEmpty()) throw ConfigException("Lien vide")
         val scheme = link.substringBefore("://", "").lowercase()
-        if (scheme != "vless" && scheme != "vmess") {
-            throw ConfigException("Protocole non pris en charge : utilisez un lien vless:// ou vmess://")
+        if (scheme !in SUPPORTED_LINK_SCHEMES) {
+            throw ConfigException(
+                "Protocole non pris en charge : utilisez un lien vless://, vmess://, " +
+                    "trojan://, ss:// ou socks://"
+            )
         }
         if (scheme == "vmess" && !link.substringAfter("://").contains('@')) {
             throw ConfigException(
@@ -107,8 +114,9 @@ object ConfigImporter {
 
         val outbound = extractSingleOutbound(root)
             ?: throw ConfigException(
-                "Aucun serveur VLESS/VMess dans ce JSON : ajoutez une sortie " +
-                    "\"protocol\": \"vless\" ou \"vmess\" avec son adresse, son port et son identifiant"
+                "Aucun serveur compatible dans ce JSON : ajoutez une sortie " +
+                    "\"protocol\" vless, vmess, trojan, shadowsocks ou socks " +
+                    "avec son adresse, son port et ses identifiants"
             )
         val normalized = normalizeVnext(outbound)
 
@@ -126,20 +134,20 @@ object ConfigImporter {
             val supported = ArrayList<JSONObject>()
             for (index in 0 until outbounds.length()) {
                 val candidate = outbounds.optJSONObject(index) ?: continue
-                val protocol = candidate.optString("protocol").lowercase()
-                if (protocol == "vless" || protocol == "vmess") supported.add(candidate)
+                if (candidate.optString("protocol").lowercase() in SUPPORTED_OUTBOUND_PROTOCOLS) {
+                    supported.add(candidate)
+                }
             }
             return when (supported.size) {
                 0 -> null
                 1 -> supported[0]
                 else -> throw ConfigException(
-                    "Le JSON contient ${supported.size} sorties VLESS/VMess ; " +
+                    "Le JSON contient ${supported.size} sorties compatibles ; " +
                         "importez une configuration avec une seule sortie"
                 )
             }
         }
-        val protocol = root.optString("protocol").lowercase()
-        if (protocol == "vless" || protocol == "vmess") return root
+        if (root.optString("protocol").lowercase() in SUPPORTED_OUTBOUND_PROTOCOLS) return root
         return null
     }
 
@@ -180,18 +188,21 @@ object ConfigImporter {
         val protocol = when (protocolName) {
             "vless" -> TunnelProtocol.VLESS
             "vmess" -> TunnelProtocol.VMESS
+            "trojan" -> TunnelProtocol.TROJAN
+            "shadowsocks" -> TunnelProtocol.SHADOWSOCKS
+            "socks" -> TunnelProtocol.SOCKS
             "" -> throw ConfigException("Protocole absent du serveur")
             else -> throw ConfigException("Protocole non pris en charge : $protocolName")
         }
 
         val settings = outbound.optJSONObject("settings")
             ?: throw ConfigException("Paramètres du serveur absents")
-        if (settings.optString("id").isBlank()) {
-            throw ConfigException("UUID/identifiant du serveur manquant")
-        }
-        val address = settings.optString("address").trim()
+        val server = singleServer(settings)
+        requireCredentials(protocol, server)
+
+        val address = server.optString("address").trim()
         if (address.isEmpty()) throw ConfigException("Adresse du serveur manquante")
-        val port = settings.optInt("port", 0)
+        val port = server.optInt("port", 0)
         if (port !in 1..65535) throw ConfigException("Port du serveur invalide")
 
         val security = outbound.optJSONObject("streamSettings")
@@ -207,12 +218,49 @@ object ConfigImporter {
 
         return TunnelProfile(
             id = sha256(outboundJson).take(16),
-            displayName = explicitName ?: tag ?: fallbackName ?: "${protocol.name} $address",
+            displayName = explicitName ?: tag ?: fallbackName ?: "${protocol.label} $address",
             protocol = protocol,
             endpoint = "$address:$port",
             security = security,
             outboundJson = outboundJson
         )
+    }
+
+    /**
+     * v2ray-style Shadowsocks/SOCKS JSON wraps the endpoint in
+     * settings.servers[0]. Only a single server can be persisted per profile.
+     */
+    private fun singleServer(settings: JSONObject): JSONObject {
+        val servers = settings.optJSONArray("servers") ?: return settings
+        if (servers.length() != 1) {
+            throw ConfigException(
+                "Une seule entrée « servers » est acceptée (${servers.length()} trouvées)"
+            )
+        }
+        return servers.optJSONObject(0)
+            ?: throw ConfigException("Entrée « servers » invalide")
+    }
+
+    private fun requireCredentials(protocol: TunnelProtocol, server: JSONObject) {
+        when (protocol) {
+            TunnelProtocol.VLESS, TunnelProtocol.VMESS ->
+                if (server.optString("id").isBlank()) {
+                    throw ConfigException("UUID/identifiant du serveur manquant")
+                }
+            TunnelProtocol.TROJAN ->
+                if (server.optString("password").isBlank()) {
+                    throw ConfigException("Mot de passe Trojan manquant")
+                }
+            TunnelProtocol.SHADOWSOCKS -> {
+                if (server.optString("method").isBlank()) {
+                    throw ConfigException("Méthode de chiffrement Shadowsocks manquante")
+                }
+                if (server.optString("password").isBlank()) {
+                    throw ConfigException("Mot de passe Shadowsocks manquant")
+                }
+            }
+            TunnelProtocol.SOCKS -> Unit
+        }
     }
 
     private suspend fun validateWithEngine(profile: TunnelProfile) {
@@ -235,7 +283,7 @@ object ConfigImporter {
         val sanitized = XrayErrorSanitizer.sanitize(error)
         return when {
             sanitized.contains("no valid outbound", ignoreCase = true) ->
-                "Lien VLESS/VMess invalide : aucun serveur exploitable " +
+                "Lien invalide : aucun serveur exploitable " +
                     "(Xray refuse notamment un VLESS public sans TLS ni chiffrement)"
             sanitized.contains("unsupported share format", ignoreCase = true) ->
                 "Format de lien non reconnu"

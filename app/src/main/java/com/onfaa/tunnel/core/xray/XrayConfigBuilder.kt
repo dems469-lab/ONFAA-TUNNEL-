@@ -36,6 +36,14 @@ object XrayConfigBuilder {
         "fe80::/10"
     )
 
+    private val SUPPORTED_PROTOCOLS = setOf(
+        TunnelProtocol.VLESS,
+        TunnelProtocol.VMESS,
+        TunnelProtocol.TROJAN,
+        TunnelProtocol.SHADOWSOCKS,
+        TunnelProtocol.SOCKS
+    )
+
     fun build(
         profile: TunnelProfile,
         tunFd: Int,
@@ -43,8 +51,8 @@ object XrayConfigBuilder {
         dnsEndpoints: List<String> = DEFAULT_DNS_ENDPOINTS,
         logLevel: String = DEFAULT_LOG_LEVEL
     ): String {
-        require(profile.protocol == TunnelProtocol.VLESS || profile.protocol == TunnelProtocol.VMESS) {
-            "Only VLESS and VMess are supported"
+        require(profile.protocol in SUPPORTED_PROTOCOLS) {
+            "Unsupported protocol: ${profile.protocol}"
         }
         require(dnsEndpoints.isNotEmpty()) { "At least one DNS endpoint is required" }
 

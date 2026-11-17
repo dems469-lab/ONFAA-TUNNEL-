@@ -1,8 +1,9 @@
 package com.onfaa.tunnel.domain.model
 
 /**
- * A validated VLESS/VMess outbound produced by libXray's real share-link
- * converter or extracted from a user-supplied Xray JSON configuration.
+ * A validated Xray outbound (VLESS, VMess, Trojan, Shadowsocks or SOCKS5)
+ * produced by libXray's real share-link converter or extracted from a
+ * user-supplied Xray JSON configuration.
  * [outboundJson] contains the Xray outbound object (and therefore the server
  * credential): it is encrypted at rest, never logged and never displayed.
  *

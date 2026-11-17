@@ -1,8 +1,8 @@
 package com.onfaa.tunnel.domain.model
 
 /**
- * Domain model for a user-provided server configuration (VLESS/VMess planned).
- * Sensitive fields (UUID, keys, raw URIs) must never be logged.
+ * Domain model for a user-provided server configuration.
+ * Sensitive fields (UUID, passwords, keys, raw URIs) must never be logged.
  */
 data class ServerConfig(
     val id: String,
@@ -13,7 +13,10 @@ data class ServerConfig(
     val notes: String? = null
 )
 
-enum class TunnelProtocol {
-    VLESS,
-    VMESS
+enum class TunnelProtocol(val label: String) {
+    VLESS("VLESS"),
+    VMESS("VMess"),
+    TROJAN("Trojan"),
+    SHADOWSOCKS("Shadowsocks"),
+    SOCKS("SOCKS5")
 }

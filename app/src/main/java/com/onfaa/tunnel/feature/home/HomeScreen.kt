@@ -132,7 +132,7 @@ fun HomeScreen() {
         if (selected == null) {
             Spacer(modifier = Modifier.height(12.dp))
             Text(
-                text = "Importez une configuration VLESS ou VMess dans l'onglet Configurations.",
+                text = "Importez une configuration (VLESS, VMess, Trojan, Shadowsocks, SOCKS5) dans l'onglet Configurations.",
                 style = MaterialTheme.typography.bodySmall,
                 textAlign = TextAlign.Center
             )
@@ -174,13 +174,13 @@ private fun statusTitle(state: TunnelState): String = when (state) {
 }
 
 private fun statusDetail(state: TunnelState, selected: TunnelProfile?): String = when (state) {
-    TunnelState.Idle -> selected?.let { "${it.protocol.name} — ${it.endpoint}" }
+    TunnelState.Idle -> selected?.let { "${it.protocol.label} — ${it.endpoint}" }
         ?: "Aucune connexion active."
     TunnelState.AwaitingPermission -> "Android demande l'autorisation d'établir le VPN."
     TunnelState.Preparing -> "Validation du profil et préparation de l'interface TUN."
     TunnelState.Connecting -> "Démarrage du moteur Xray et du TUN Android."
     TunnelState.Verifying -> "Le moteur est actif ; vérification réelle du trafic."
-    is TunnelState.Connected -> "${state.profileName} — ${state.protocol.name}"
+    is TunnelState.Connected -> "${state.profileName} — ${state.protocol.label}"
     is TunnelState.Reconnecting ->
         "Réseau perdu (tentative ${state.attempt}) : le tunnel sera revalidé dès le retour du réseau."
     TunnelState.Disconnecting -> "Arrêt du moteur et fermeture du TUN."

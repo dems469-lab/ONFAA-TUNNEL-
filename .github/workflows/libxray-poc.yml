@@ -49,6 +49,12 @@ env:
   E2E_TOKEN: "onfaa-e2e-token-phase3"
   E2E_VLESS_PORT: "18443"
   E2E_VMESS_PORT: "18444"
+  E2E_TROJAN_PORT: "18445"
+  E2E_SS_PORT: "18446"
+  # Test-only fixture credentials, never real user secrets.
+  E2E_TROJAN_PASSWORD: "onfaa-e2e-trojan-password"
+  E2E_SS_METHOD: "aes-256-gcm"
+  E2E_SS_PASSWORD: "onfaa-e2e-ss-password"
   E2E_HTTP_PORT: "18080"
   E2E_DNS_PORT: "15353"
   E2E_ANSWER_IP: "192.0.2.10"
@@ -234,6 +240,25 @@ jobs:
                 "settings": {
                   "clients": [{"id": "$E2E_UUID"}]
                 }
+              },
+              {
+                "tag": "trojan-in",
+                "listen": "127.0.0.1",
+                "port": $E2E_TROJAN_PORT,
+                "protocol": "trojan",
+                "settings": {
+                  "clients": [{"password": "$E2E_TROJAN_PASSWORD"}]
+                }
+              },
+              {
+                "tag": "ss-in",
+                "listen": "127.0.0.1",
+                "port": $E2E_SS_PORT,
+                "protocol": "shadowsocks",
+                "settings": {
+                  "method": "$E2E_SS_METHOD",
+                  "password": "$E2E_SS_PASSWORD"
+                }
               }
             ],
             "routing": {
@@ -322,6 +347,8 @@ jobs:
 
           wait_tcp("127.0.0.1", 18443, "VLESS inbound")
           wait_tcp("127.0.0.1", 18444, "VMess inbound")
+          wait_tcp("127.0.0.1", 18445, "Trojan inbound")
+          wait_tcp("127.0.0.1", 18446, "Shadowsocks inbound")
           wait_tcp("127.0.0.1", http_port, "token HTTP")
           wait_dns_tcp("127.0.0.1", dns_port)
           print("E2E responders ready (Xray, token HTTP, DNS/TCP)")
@@ -334,7 +361,7 @@ jobs:
           curl -fsS "http://127.0.0.1:$E2E_HTTP_PORT/token" -o "$E2E_DIR/token.txt"
           test -s "$E2E_DIR/token.txt" || { cat "$E2E_DIR/services.log"; exit 1; }
           test "$(cat "$E2E_DIR/token.txt")" = "$E2E_TOKEN"
-          echo "E2E servers ready: Xray $E2E_VLESS_PORT/$E2E_VMESS_PORT, token $E2E_HTTP_PORT, DNS $E2E_DNS_PORT"
+          echo "E2E servers ready: Xray $E2E_VLESS_PORT/$E2E_VMESS_PORT/$E2E_TROJAN_PORT/$E2E_SS_PORT, token $E2E_HTTP_PORT, DNS $E2E_DNS_PORT"
 
       - name: Publish PoC evidence to log and job summary
         shell: bash
@@ -443,7 +470,7 @@ jobs:
             # The runner executes every line in its own /bin/sh, so this command
             # must stay on a single line (a trailing backslash would be passed
             # to Gradle as a literal argument).
-            ./gradlew :app:connectedDebugAndroidTest --stacktrace -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e=true -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.uuid="$E2E_UUID" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.host="10.0.2.2" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.vlessPort="$E2E_VLESS_PORT" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.vmessPort="$E2E_VMESS_PORT" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.dns="tcp+local://10.0.2.2:$E2E_DNS_PORT" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.probeUrl="http://$E2E_ANSWER_IP:$E2E_HTTP_PORT/token" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.token="$E2E_TOKEN"
+            ./gradlew :app:connectedDebugAndroidTest --stacktrace -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e=true -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.uuid="$E2E_UUID" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.host="10.0.2.2" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.vlessPort="$E2E_VLESS_PORT" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.vmessPort="$E2E_VMESS_PORT" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.trojanPort="$E2E_TROJAN_PORT" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.trojanPassword="$E2E_TROJAN_PASSWORD" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.ssPort="$E2E_SS_PORT" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.ssMethod="$E2E_SS_METHOD" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.ssPassword="$E2E_SS_PASSWORD" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.dns="tcp+local://10.0.2.2:$E2E_DNS_PORT" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.probeUrl="http://$E2E_ANSWER_IP:$E2E_HTTP_PORT/token" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.token="$E2E_TOKEN"
 
       - name: Publish instrumented test results to job summary
         # Run after a test failure (we need its XML), but do not fabricate a
@@ -488,7 +515,7 @@ jobs:
           python3 scripts/e2e/verify_instrumented_evidence.py \
             --results-dir app/build/outputs/androidTest-results \
             --out-dir "$REPORT/e2e" \
-            --suite VpnTunnelE2ETest --min-tests 4 \
+            --suite VpnTunnelE2ETest --min-tests 6 \
             > "$REPORT/e2e/verify.log" 2>&1 || E2E_STATUS=1
           cat "$REPORT/e2e/verify.log"
           cp "$REPORT/e2e/verify.log" "$REPORT/e2e/testsuite.txt"
@@ -516,10 +543,10 @@ jobs:
             FAIL=1
           fi
 
-          # Xray 26.x freedom blocks private destinations by default for
-          # vless/vmess inbounds; the token-redirect outbound must therefore
-          # carry an explicit allow finalRule. Treat a blackhole as a failure
-          # instead of a silent 6 s client timeout.
+          # Xray 26.x freedom blocks private destinations by default for these
+          # inbounds; the token-redirect outbound must therefore carry an
+          # explicit allow finalRule. Treat a blackhole as a failure instead of
+          # a silent 6 s client timeout.
           if [ -f "$REPORT/e2e/xray-server.log" ] && grep -q "target blocked by a finalrule" "$REPORT/e2e/xray-server.log"; then
             echo "SERVER_BLOCKED_TUNNEL_TARGET" | tee -a "$REPORT/e2e/result.txt"
             FAIL=1
@@ -527,10 +554,13 @@ jobs:
 
           VLESS_PROXIED=$(grep -c "vless-in -> token-redirect" "$REPORT/e2e/access.log" 2>/dev/null || true)
           VMESS_PROXIED=$(grep -c "vmess-in -> token-redirect" "$REPORT/e2e/access.log" 2>/dev/null || true)
-          if [ "${VLESS_PROXIED:-0}" -ge 1 ] && [ "${VMESS_PROXIED:-0}" -ge 1 ]; then
-            echo "ACCESS_LOG_PER_PROTOCOL_OK vless=$VLESS_PROXIED vmess=$VMESS_PROXIED" | tee -a "$REPORT/e2e/result.txt"
+          TROJAN_PROXIED=$(grep -c "trojan-in -> token-redirect" "$REPORT/e2e/access.log" 2>/dev/null || true)
+          SS_PROXIED=$(grep -c "ss-in -> token-redirect" "$REPORT/e2e/access.log" 2>/dev/null || true)
+          if [ "${VLESS_PROXIED:-0}" -ge 1 ] && [ "${VMESS_PROXIED:-0}" -ge 1 ] \
+            && [ "${TROJAN_PROXIED:-0}" -ge 1 ] && [ "${SS_PROXIED:-0}" -ge 1 ]; then
+            echo "ACCESS_LOG_PER_PROTOCOL_OK vless=$VLESS_PROXIED vmess=$VMESS_PROXIED trojan=$TROJAN_PROXIED shadowsocks=$SS_PROXIED" | tee -a "$REPORT/e2e/result.txt"
           else
-            echo "ACCESS_LOG_PER_PROTOCOL_MISSING vless=$VLESS_PROXIED vmess=$VMESS_PROXIED" | tee -a "$REPORT/e2e/result.txt"
+            echo "ACCESS_LOG_PER_PROTOCOL_MISSING vless=$VLESS_PROXIED vmess=$VMESS_PROXIED trojan=$TROJAN_PROXIED shadowsocks=$SS_PROXIED" | tee -a "$REPORT/e2e/result.txt"
             FAIL=1
           fi
 

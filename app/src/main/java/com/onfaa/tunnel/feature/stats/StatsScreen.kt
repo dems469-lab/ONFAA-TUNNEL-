@@ -68,7 +68,7 @@ fun StatsScreen() {
                 when (val current = state) {
                     is TunnelState.Connected -> {
                         MetricRow("Profil actif", current.profileName)
-                        MetricRow("Protocole", current.protocol.name)
+                        MetricRow("Protocole", current.protocol.label)
                         MetricRow("Durée de connexion", formatDuration(nowEpochMs - current.sinceEpochMs))
                     }
 

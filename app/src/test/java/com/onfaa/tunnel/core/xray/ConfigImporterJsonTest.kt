@@ -32,13 +32,48 @@ class ConfigImporterJsonTest {
     @Test
     fun rejectsJsonWithoutVlessOrVmessOutbound() {
         val message = rejectionOf("""{"outbounds":[{"protocol":"freedom","tag":"direct"}]}""")
-        assertTrue(message, message.contains("Aucun serveur VLESS/VMess"))
+        assertTrue(message, message.contains("Aucun serveur compatible"))
     }
 
     @Test
     fun rejectsUnsupportedProtocolAsSingleOutbound() {
+        val message = rejectionOf("""{"protocol":"hysteria2","settings":{"address":"a.example","port":443}}""")
+        assertTrue(message, message.contains("Aucun serveur compatible"))
+    }
+
+    @Test
+    fun rejectsTrojanWithoutPassword() {
         val message = rejectionOf("""{"protocol":"trojan","settings":{"address":"a.example","port":443}}""")
-        assertTrue(message, message.contains("Aucun serveur VLESS/VMess"))
+        assertTrue(message, message.contains("Mot de passe Trojan"))
+    }
+
+    @Test
+    fun rejectsShadowsocksWithoutMethod() {
+        val message = rejectionOf(
+            """{"protocol":"shadowsocks","settings":{"address":"a.example","port":8388,"password":"secret"}}"""
+        )
+        assertTrue(message, message.contains("Méthode de chiffrement Shadowsocks"))
+    }
+
+    @Test
+    fun rejectsShadowsocksWithoutPassword() {
+        val message = rejectionOf(
+            """{"protocol":"shadowsocks","settings":{"address":"a.example","port":8388,"method":"aes-256-gcm"}}"""
+        )
+        assertTrue(message, message.contains("Mot de passe Shadowsocks"))
+    }
+
+    @Test
+    fun rejectsSeveralServersInOneOutbound() {
+        val message = rejectionOf(
+            """
+            {"protocol":"shadowsocks","settings":{"servers":[
+              {"address":"a.example","port":8388,"method":"aes-256-gcm","password":"secret"},
+              {"address":"b.example","port":8388,"method":"aes-256-gcm","password":"secret"}
+            ]}}
+            """.trimIndent()
+        )
+        assertTrue(message, message.contains("servers"))
     }
 
     @Test

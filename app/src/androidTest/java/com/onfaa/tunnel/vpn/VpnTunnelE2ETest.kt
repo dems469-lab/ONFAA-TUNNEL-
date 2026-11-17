@@ -4,6 +4,7 @@ import android.content.Intent
 import android.net.VpnService
 import android.os.ParcelFileDescriptor
 import android.os.SystemClock
+import android.util.Base64
 import androidx.core.content.ContextCompat
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -30,12 +31,14 @@ import java.net.URL
  * the pinned commit on the CI host. Requires instrumentation arguments:
  *   onfaa.e2e=true
  *   onfaa.e2e.uuid, onfaa.e2e.host, onfaa.e2e.vlessPort, onfaa.e2e.vmessPort
+ *   onfaa.e2e.trojanPort, onfaa.e2e.trojanPassword
+ *   onfaa.e2e.ssPort, onfaa.e2e.ssMethod, onfaa.e2e.ssPassword
  *   onfaa.e2e.dns, onfaa.e2e.probeUrl, onfaa.e2e.token
  *
  * A TEST-NET address (192.0.2.10) is routed by the local server to a token
  * HTTP server bound on the host loopback alias. It is unreachable directly
  * from the emulator, so a successful request proves the packet traversed the
- * real Xray client -> VLESS/VMess server path.
+ * real Xray client -> server path for each protocol.
  */
 @RunWith(AndroidJUnit4::class)
 class VpnTunnelE2ETest {
@@ -49,6 +52,11 @@ class VpnTunnelE2ETest {
     private val host get() = args.getString("onfaa.e2e.host") ?: "10.0.2.2"
     private val vlessPort get() = args.getString("onfaa.e2e.vlessPort") ?: "18443"
     private val vmessPort get() = args.getString("onfaa.e2e.vmessPort") ?: "18444"
+    private val trojanPort get() = args.getString("onfaa.e2e.trojanPort") ?: "18445"
+    private val trojanPassword get() = args.getString("onfaa.e2e.trojanPassword").orEmpty()
+    private val ssPort get() = args.getString("onfaa.e2e.ssPort") ?: "18446"
+    private val ssMethod get() = args.getString("onfaa.e2e.ssMethod") ?: "aes-256-gcm"
+    private val ssPassword get() = args.getString("onfaa.e2e.ssPassword").orEmpty()
     private val dns get() = args.getString("onfaa.e2e.dns") ?: "tcp://10.0.2.2:15353"
     private val probeUrl get() = args.getString("onfaa.e2e.probeUrl") ?: "http://onfaa.test:18080/token"
     private val token get() = args.getString("onfaa.e2e.token") ?: ""
@@ -103,6 +111,20 @@ class VpnTunnelE2ETest {
     @Test
     fun vmessTunnelForwardsTrafficAndStopsCleanly() {
         val link = vmessLink()
+        assertDirectTrafficFails()
+        runTunnelScenario(link)
+    }
+
+    @Test
+    fun trojanTunnelForwardsTrafficAndStopsCleanly() {
+        val link = trojanLink()
+        assertDirectTrafficFails()
+        runTunnelScenario(link)
+    }
+
+    @Test
+    fun shadowsocksTunnelForwardsTrafficAndStopsCleanly() {
+        val link = ssLink()
         assertDirectTrafficFails()
         runTunnelScenario(link)
     }
@@ -174,6 +196,26 @@ class VpnTunnelE2ETest {
 
     private fun vmessLink(): String =
         "vmess://$uuid@$host:$vmessPort?encryption=auto&security=none&type=tcp#CI%20VMess"
+
+    /**
+     * CI fixture runs the Trojan inbound without TLS: Xray's Trojan inbound
+     * does not require TLS, and the TLS transport itself is already covered by
+     * the VLESS TLS conversion tests. Real users keep security=tls in links.
+     */
+    private fun trojanLink(): String =
+        "trojan://$trojanPassword@$host:$trojanPort?security=none&type=tcp#CI%20Trojan"
+
+    /**
+     * SIP002 Shadowsocks link: URL-safe base64 userinfo carrying
+     * method:password, decoded by libXray's real share-link converter.
+     */
+    private fun ssLink(): String {
+        val userInfo = Base64.encodeToString(
+            "$ssMethod:$ssPassword".toByteArray(Charsets.UTF_8),
+            Base64.NO_WRAP or Base64.URL_SAFE or Base64.NO_PADDING
+        )
+        return "ss://$userInfo@$host:$ssPort#CI%20Shadowsocks"
+    }
 
     /** Token endpoint addressed by DNS name, as production users would. */
     private fun dnsProbeUrl(): String {
