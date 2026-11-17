@@ -399,15 +399,10 @@ jobs:
             set -eu
             adb shell settings put global private_dns_mode off
             adb shell appops set com.onfaa.tunnel ACTIVATE_VPN allow || true
-            ./gradlew :app:connectedDebugAndroidTest --stacktrace \
-              -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e=true \
-              -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.uuid="$E2E_UUID" \
-              -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.host="10.0.2.2" \
-              -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.vlessPort="$E2E_VLESS_PORT" \
-              -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.vmessPort="$E2E_VMESS_PORT" \
-              -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.dns="tcp://10.0.2.2:$E2E_DNS_PORT" \
-              -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.probeUrl="http://onfaa.test:$E2E_HTTP_PORT/token" \
-              -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.token="$E2E_TOKEN"
+            # The runner executes every line in its own /bin/sh, so this command
+            # must stay on a single line (a trailing backslash would be passed
+            # to Gradle as a literal argument).
+            ./gradlew :app:connectedDebugAndroidTest --stacktrace -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e=true -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.uuid="$E2E_UUID" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.host="10.0.2.2" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.vlessPort="$E2E_VLESS_PORT" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.vmessPort="$E2E_VMESS_PORT" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.dns="tcp://10.0.2.2:$E2E_DNS_PORT" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.probeUrl="http://onfaa.test:$E2E_HTTP_PORT/token" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.token="$E2E_TOKEN"
 
       - name: Publish instrumented test results to job summary
         if: always()
@@ -440,29 +435,22 @@ jobs:
           mkdir -p "$REPORT/e2e"
           FAIL=0
 
-          E2E_XML="$(find app/build/outputs/androidTest-results -name '*VpnTunnelE2ETest*.xml' 2>/dev/null | head -1 || true)"
-          if [ -z "$E2E_XML" ]; then
-            echo "E2E_XML_MISSING" | tee "$REPORT/e2e/result.txt"
-            FAIL=1
+          # AGP writes one device-level XML per run (root <testsuites>) whose
+          # children are per-class <testsuite name="com.onfaa...VpnTunnelE2ETest">.
+          # Select the E2E suite by name instead of assuming a file name.
+          E2E_STATUS=0
+          python3 scripts/e2e/verify_instrumented_evidence.py \
+            --results-dir app/build/outputs/androidTest-results \
+            --out-dir "$REPORT/e2e" \
+            --suite VpnTunnelE2ETest --min-tests 3 \
+            > "$REPORT/e2e/verify.log" 2>&1 || E2E_STATUS=1
+          cat "$REPORT/e2e/verify.log"
+          cp "$REPORT/e2e/verify.log" "$REPORT/e2e/testsuite.txt"
+          if [ "$E2E_STATUS" -eq 0 ]; then
+            echo "E2E_XML_VALIDATED" >> "$REPORT/e2e/result.txt"
           else
-            cp "$E2E_XML" "$REPORT/e2e/VpnTunnelE2ETest.xml"
-            grep -h "<testsuite " "$E2E_XML" | tee "$REPORT/e2e/testsuite.txt"
-            python3 - "$E2E_XML" <<'PY' || FAIL=1
-          import sys
-          import xml.etree.ElementTree as ET
-          root = ET.parse(sys.argv[1]).getroot()
-          suite = root if root.tag == "testsuite" else root.find("testsuite")
-          if suite is None:
-              print("E2E_NO_TESTSuite")
-              sys.exit(1)
-          tests = int(suite.get("tests", "0"))
-          failures = int(suite.get("failures", "0"))
-          errors = int(suite.get("errors", "0"))
-          skipped = int(suite.get("skipped", "0"))
-          print(f"E2E tests={tests} failures={failures} errors={errors} skipped={skipped}")
-          if tests < 3 or failures or errors or skipped:
-              sys.exit(1)
-          PY
+            echo "E2E_XML_INVALID" >> "$REPORT/e2e/result.txt"
+            FAIL=1
           fi
 
           if [ -f "$E2E_DIR/xray.pid" ]; then kill "$(cat "$E2E_DIR/xray.pid")" 2>/dev/null || true; fi
