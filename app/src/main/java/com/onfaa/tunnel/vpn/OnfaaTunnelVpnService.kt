@@ -87,6 +87,11 @@ class OnfaaTunnelVpnService : VpnService() {
     private var trafficJob: Job? = null
     private var healthJob: Job? = null
 
+    // True while the tunnel is known to forward traffic (IP probe) but
+    // hostname resolution through it has not succeeded yet.
+    @Volatile
+    private var dnsPendingNotice = false
+
     private var connectedSinceEpochMs: Long = 0L
 
     @Volatile
@@ -224,10 +229,33 @@ class OnfaaTunnelVpnService : VpnService() {
             updateNotification("Vérification de la connectivité…")
             val probeUrl = intent.getStringExtra(EXTRA_PROBE_URL) ?: DEFAULT_PROBE_URL
             val probe = awaitConnectivity(probeUrl)
-            if (!probe.ok) {
-                throw IllegalStateException("Tunnel démarré mais connectivité non vérifiée : ${probe.detail}")
+            if (!probe.ok && !ConnectivityProbe.isDnsFailure(probe)) {
+                throw IllegalStateException(
+                    "Tunnel démarré mais connectivité non vérifiée : ${probe.detail}"
+                )
             }
-            TunnelStatusRepository.log("Connectivité réelle vérifiée (${probe.detail})")
+            if (!probe.ok) {
+                // DNS-only failure: hostname resolution warms up late through a
+                // cold tunnel. Prove the engine forwards traffic with raw IP
+                // connects before deciding anything, and never kill a working
+                // tunnel over a late resolver.
+                val forwarding = ConnectivityProbe.checkIpProbe()
+                if (!forwarding.ok) {
+                    throw IllegalStateException(
+                        "Tunnel démarré mais connectivité non vérifiée : " +
+                            "${probe.detail} ; ${forwarding.detail}"
+                    )
+                }
+                dnsPendingNotice = true
+                TunnelStatusRepository.log(
+                    "Tunnel actif : trafic vérifié (${forwarding.detail}) ; " +
+                        "résolution DNS en attente : ${probe.detail}",
+                    LogSeverity.WARNING
+                )
+            } else {
+                dnsPendingNotice = false
+                TunnelStatusRepository.log("Connectivité réelle vérifiée (${probe.detail})")
+            }
 
             if (destroyed) {
                 teardownEngine()
@@ -339,6 +367,36 @@ class OnfaaTunnelVpnService : VpnService() {
      * probe succeeds again. Nothing reports Connected while the tunnel is not
      * proven.
      */
+    /**
+     * Hostname probe with an IP-literal fallback: while name resolution is
+     * down but the engine forwards traffic, the tunnel is kept up and the
+     * detail states exactly what was proven (TCP via tunnel, DNS pending).
+     */
+    private suspend fun verifyTunnel(probeUrl: String): ConnectivityProbe.Result {
+        val probe = ConnectivityProbe.check(probeUrl, timeoutMs = 8_000)
+        if (probe.ok) {
+            if (dnsPendingNotice) {
+                dnsPendingNotice = false
+                TunnelStatusRepository.log(
+                    "Résolution DNS opérationnelle via le tunnel",
+                    LogSeverity.SUCCESS
+                )
+            }
+            return probe
+        }
+        if (ConnectivityProbe.isDnsFailure(probe)) {
+            val forwarding = ConnectivityProbe.checkIpProbe()
+            if (forwarding.ok) {
+                dnsPendingNotice = true
+                return ConnectivityProbe.Result(
+                    true,
+                    "${forwarding.detail} — DNS en attente : ${probe.detail}"
+                )
+            }
+        }
+        return probe
+    }
+
     private fun startHealthMonitor(profile: TunnelProfile, probeUrl: String) {
         healthJob?.cancel()
         healthJob = scope.launch {
@@ -346,7 +404,7 @@ class OnfaaTunnelVpnService : VpnService() {
                 delay(HEALTH_CHECK_INTERVAL_MS)
                 if (destroyed) break
                 if (TunnelStatusRepository.state.value !is TunnelState.Connected) continue
-                val probe = ConnectivityProbe.check(probeUrl, timeoutMs = 8_000)
+                val probe = verifyTunnel(probeUrl)
                 if (probe.ok) {
                     Log.i(TAG, "Health probe ok: ${probe.detail}")
                     continue
@@ -370,7 +428,7 @@ class OnfaaTunnelVpnService : VpnService() {
         while (!destroyed && SystemClock.elapsedRealtime() < deadline) {
             delay(RECONNECT_DELAY_MS)
             if (destroyed) return
-            val probe = ConnectivityProbe.check(probeUrl, timeoutMs = 8_000)
+            val probe = verifyTunnel(probeUrl)
             if (probe.ok) {
                 val since = connectedSinceEpochMs.takeIf { it > 0L } ?: System.currentTimeMillis()
                 TunnelStatusRepository.set(

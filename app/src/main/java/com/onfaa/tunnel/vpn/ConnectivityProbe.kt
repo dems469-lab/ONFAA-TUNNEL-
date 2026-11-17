@@ -2,6 +2,8 @@ package com.onfaa.tunnel.vpn
 
 import com.onfaa.tunnel.core.xray.XrayErrorSanitizer
 import java.net.HttpURLConnection
+import java.net.InetSocketAddress
+import java.net.Socket
 import java.net.URL
 
 /**
@@ -36,4 +38,43 @@ object ConnectivityProbe {
     } catch (t: Throwable) {
         Result(false, XrayErrorSanitizer.sanitize("${t.javaClass.simpleName}: ${t.message.orEmpty()}"))
     }
+
+    /**
+     * True when a failed probe failed at the name-resolution stage instead of
+     * the transport stage. Hostname resolution runs through the freshly
+     * established tunnel and warms up late on slow servers, so this shape of
+     * failure says nothing yet about whether the tunnel forwards packets.
+     */
+    fun isDnsFailure(result: Result): Boolean =
+        !result.ok && DNS_FAILURE_PATTERN.containsMatchIn(result.detail)
+
+    /**
+     * Raw TCP connect to well-known IP literals, still without socket
+     * protection so the connections are routed through the tunnel. No DNS is
+     * involved: a success proves the engine really forwards traffic even
+     * while hostname resolution is not answering yet.
+     */
+    fun checkIpProbe(timeoutMs: Int = 6_000): Result {
+        val candidates = listOf("1.1.1.1" to 443, "8.8.8.8" to 443, "9.9.9.9" to 53)
+        var lastFailure = "aucune tentative"
+        for ((host, port) in candidates) {
+            try {
+                Socket().use { socket ->
+                    socket.connect(InetSocketAddress(host, port), timeoutMs)
+                }
+                return Result(
+                    true,
+                    "TCP $host:$port connecté via le tunnel (sans DNS)"
+                )
+            } catch (t: Throwable) {
+                lastFailure = "$host:$port → ${t.javaClass.simpleName}: ${t.message.orEmpty()}"
+            }
+        }
+        return Result(false, XrayErrorSanitizer.sanitize("aucune destination IP joignable — $lastFailure"))
+    }
+
+    private val DNS_FAILURE_PATTERN = Regex(
+        pattern = "UnknownHostException|Unable to resolve host|No address associated|NXDOMAIN|dns",
+        option = RegexOption.IGNORE_CASE
+    )
 }
