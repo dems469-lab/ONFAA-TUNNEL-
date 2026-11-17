@@ -174,9 +174,6 @@ class OnfaaTunnelVpnService : VpnService() {
                 throw IllegalStateException("Impossible d'enregistrer la protection des sockets VPN")
             }
             XrayBridge.setDNS(protector, resolverEndpoint)
-            if (isDebuggable) {
-                diagnoseProtectedUpstream(profile.endpoint)
-            }
 
             val config = XrayConfigBuilder.build(
                 profile = profile,
@@ -301,29 +298,6 @@ class OnfaaTunnelVpnService : VpnService() {
 
     private val isDebuggable: Boolean
         get() = (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
-
-    /**
-     * Debug-build only: a real protected TCP connection to the upstream
-     * endpoint before the engine starts. It separates VPN socket-routing
-     * failures (the errno is logged) from Xray protocol failures. Release
-     * builds never run it.
-     */
-    private fun diagnoseProtectedUpstream(endpoint: String) {
-        val separator = endpoint.lastIndexOf(':')
-        if (separator <= 0) return
-        val host = endpoint.substring(0, separator)
-        val port = endpoint.substring(separator + 1).toIntOrNull() ?: return
-        try {
-            java.net.Socket().use { socket ->
-                val granted = protect(socket)
-                Log.i(TAG, "Upstream probe $host:$port protected=$granted")
-                socket.connect(java.net.InetSocketAddress(host, port), 5_000)
-                Log.i(TAG, "Upstream probe $host:$port connected=${socket.isConnected}")
-            }
-        } catch (t: Throwable) {
-            Log.w(TAG, "Upstream probe $host:$port failed: ${t.javaClass.simpleName}: ${t.message}")
-        }
-    }
 
     private fun buildTun(): ParcelFileDescriptor? {
         val builder = Builder()

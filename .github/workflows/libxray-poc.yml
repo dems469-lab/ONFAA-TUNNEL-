@@ -243,7 +243,17 @@ jobs:
               {
                 "protocol": "freedom",
                 "tag": "token-redirect",
-                "settings": {"redirect": "127.0.0.1:$E2E_HTTP_PORT"}
+                "settings": {
+                  "redirect": "127.0.0.1:$E2E_HTTP_PORT",
+                  "finalRules": [
+                    {
+                      "action": "allow",
+                      "network": "tcp",
+                      "ip": ["127.0.0.1"],
+                      "port": "$E2E_HTTP_PORT"
+                    }
+                  ]
+                }
               }
             ]
           }
@@ -482,6 +492,24 @@ jobs:
             echo "ACCESS_LOG_PROVES_TUNNEL_DESTINATION" | tee -a "$REPORT/e2e/result.txt"
           else
             echo "ACCESS_LOG_MISSING_TUNNEL_DESTINATION" | tee -a "$REPORT/e2e/result.txt"
+            FAIL=1
+          fi
+
+          # Xray 26.x freedom blocks private destinations by default for
+          # vless/vmess inbounds; the token-redirect outbound must therefore
+          # carry an explicit allow finalRule. Treat a blackhole as a failure
+          # instead of a silent 6 s client timeout.
+          if [ -f "$REPORT/e2e/xray-server.log" ] && grep -q "target blocked by a finalrule" "$REPORT/e2e/xray-server.log"; then
+            echo "SERVER_BLOCKED_TUNNEL_TARGET" | tee -a "$REPORT/e2e/result.txt"
+            FAIL=1
+          fi
+
+          VLESS_PROXIED=$(grep -c "vless-in -> token-redirect" "$REPORT/e2e/access.log" 2>/dev/null || true)
+          VMESS_PROXIED=$(grep -c "vmess-in -> token-redirect" "$REPORT/e2e/access.log" 2>/dev/null || true)
+          if [ "${VLESS_PROXIED:-0}" -ge 1 ] && [ "${VMESS_PROXIED:-0}" -ge 1 ]; then
+            echo "ACCESS_LOG_PER_PROTOCOL_OK vless=$VLESS_PROXIED vmess=$VMESS_PROXIED" | tee -a "$REPORT/e2e/result.txt"
+          else
+            echo "ACCESS_LOG_PER_PROTOCOL_MISSING vless=$VLESS_PROXIED vmess=$VMESS_PROXIED" | tee -a "$REPORT/e2e/result.txt"
             FAIL=1
           fi
 
