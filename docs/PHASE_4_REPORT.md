@@ -10,7 +10,7 @@
 > rejoue l’E2E réel et les 27 tests instrumentés avec l’AAR officiel : **succès** —
 > **27/27 instrumentés** (0 échec, 0 erreur, 0 ignoré, 45,579 s), E2E VLESS et VMess
 > avec sonde réelle, `ACCESS_LOG_PER_PROTOCOL_OK vless=3 vmess=3`.
-> Deux limites restent **non revendiquées** : appareil physique ARM64 (§11) et
+> Deux limites restent **non revendiquées** : appareil physique ARM64 (§10) et
 > changement d’IP publique.
 
 ## 1. Objectif
@@ -128,8 +128,8 @@ une seule sortie », « Identifiant (id) manquant », « Port invalide (1–6553
 
 Le JSON accepté est normalisé : `settings.vnext[0].users[0]` est aplati en
 `settings.address/port/id`, `streamSettings.security` conservé (`none`, `tls`,
-`reality`), `tag` réécrit. Un nom peut être fourni à l’import ; sinon un libellé
-`sérieux` est généré depuis l’hôte.
+`reality`), `tag` réécrit. Un nom peut être fourni à l’import ; sinon le libellé du
+lien (fragment décodé) ou `VLESS/VMess hôte:port` est utilisé.
 
 ### 3.4 Cycle de vie du service VPN
 
