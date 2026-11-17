@@ -14,6 +14,12 @@ Le format s’inspire de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/
 - **Version** : `versionCode 5`, `versionName 0.5.0-phase5`.
 - **Docs** : `README.md` et `docs/BUILD_GUIDE.md` indiquent désormais quel artefact installer.
 
+### Phase 5 — lot 2 en cours : wiring des transports, SNI et modes d’inject sur le moteur Xray
+- **Modes d’inject** : `InjectMode` (`DIRECT`, `DIRECT_SNI`, `PROXY`, `PROXY_SNI`, `DNSTT`) ajouté au modèle domaine ; `TunnelProfile` porte désormais le mode et le SNI résolus. `XrayConfigBuilder` applique le SNI (mode SNI-aware) et rejette `DNSTT` avec un message clair — ce mode nécessite un second moteur et n’est pas exécutable par Xray-core.
+- **Transports** : `XrayConfigBuilder.SUPPORTED_TRANSPORTS` (`tcp`, `ws`, `grpc`) ; override `transport` validé au build.
+- **Import** : le profil importé hérite du mode (`PROXY` / `PROXY_SNI`) et du SNI du serveur résolus par le moteur.
+- **Tests** : `XrayConfigBuilderTest` (4 tests JVM) couvre SNI + transport, fallback serveur, mode `PROXY` et rejet `DNSTT`/transport inconnu.
+
 ### Phase 5 — lot 1 : Trojan, Shadowsocks et SOCKS5 via le moteur Xray (livré, CI verte)
 - **Protocoles** : `TunnelProtocol` gagne `TROJAN`, `SHADOWSOCKS` et `SOCKS` (libellés UI `Trojan`, `Shadowsocks`, `SOCKS5`) ; le moteur reste XTLS/Xray-core v26.11.9 via libXray v26.11.9, aucun ajout de sing-box ni de faux moteur. Aucune migration Room : le nom de l’énumération est stocké tel quel.
 - **Import** : liens `trojan://`, `ss://` (SIP002 base64) et `socks://` (userinfo base64) convertis par `convertShareLinksToXrayJson`, plus les sorties JSON `trojan`, `shadowsocks` et `socks` (forme plate ou `settings.servers[0]`, une seule entrée). Validation adaptée au protocole : UUID (VLESS/VMess), mot de passe (Trojan), méthode + mot de passe (Shadowsocks), aucun identifiant requis (SOCKS5). Messages d’erreur précis et assainis.

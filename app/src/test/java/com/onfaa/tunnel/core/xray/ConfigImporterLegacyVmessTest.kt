@@ -71,7 +71,10 @@ class ConfigImporterLegacyVmessTest {
 
     @Test
     fun reportsCorruptedBase64() {
-        val message = errorOf("vmess://@@@ceci-n-est-pas-du-base64@@@")
+        // Corrupted payload without '@': the router must treat it as the
+        // legacy format, and both decode-failure messages name the base64
+        // block so the user knows the link itself is broken.
+        val message = errorOf("vmess://abcde!!!!")
         assertTrue(message, message.contains("base64", ignoreCase = true))
     }
 
