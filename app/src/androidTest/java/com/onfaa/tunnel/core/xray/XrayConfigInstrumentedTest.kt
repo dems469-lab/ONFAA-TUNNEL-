@@ -25,15 +25,19 @@ class XrayConfigInstrumentedTest {
         "vmess://$uuid@192.0.2.1:443?encryption=auto&security=none&type=tcp#Test%20VMess"
 
     @Before
-    fun ensureStopped() = runBlocking {
-        runCatching { XrayBridge.stopXray() }
-        XrayBridge.resetDNS()
+    fun ensureStopped() {
+        runBlocking {
+            runCatching { XrayBridge.stopXray() }
+            runCatching { XrayBridge.resetDNS() }
+        }
     }
 
     @After
-    fun cleanup() = runBlocking {
-        runCatching { XrayBridge.stopXray() }
-        runCatching { XrayBridge.resetDNS() }
+    fun cleanup() {
+        runBlocking {
+            runCatching { XrayBridge.stopXray() }
+            runCatching { XrayBridge.resetDNS() }
+        }
     }
 
     @Test

@@ -200,7 +200,7 @@ jobs:
           sudo ip addr add "$E2E_ANSWER_IP/32" dev lo
           python3 scripts/e2e/onfaa_e2e_services.py \
             --http-bind 127.0.0.1 --http-port "$E2E_HTTP_PORT" \
-            --dns-bind 127.0.0.1 --dns-port "$E2E_DNS_PORT" \
+            --dns-bind 0.0.0.0 --dns-port "$E2E_DNS_PORT" \
             --answer-ip "$E2E_ANSWER_IP" --token "$E2E_TOKEN" \
             > "$E2E_DIR/services.log" 2>&1 &
           echo $! > "$E2E_DIR/services.pid"
@@ -419,7 +419,7 @@ jobs:
             # The runner executes every line in its own /bin/sh, so this command
             # must stay on a single line (a trailing backslash would be passed
             # to Gradle as a literal argument).
-            ./gradlew :app:connectedDebugAndroidTest --stacktrace -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e=true -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.uuid="$E2E_UUID" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.host="10.0.2.2" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.vlessPort="$E2E_VLESS_PORT" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.vmessPort="$E2E_VMESS_PORT" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.dns="tcp://10.0.2.2:$E2E_DNS_PORT" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.probeUrl="http://onfaa.test:$E2E_HTTP_PORT/token" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.token="$E2E_TOKEN"
+            ./gradlew :app:connectedDebugAndroidTest --stacktrace -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e=true -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.uuid="$E2E_UUID" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.host="10.0.2.2" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.vlessPort="$E2E_VLESS_PORT" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.vmessPort="$E2E_VMESS_PORT" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.dns="tcp+local://10.0.2.2:$E2E_DNS_PORT" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.probeUrl="http://$E2E_ANSWER_IP:$E2E_HTTP_PORT/token" -Pandroid.testInstrumentationRunnerArguments.onfaa.e2e.token="$E2E_TOKEN"
 
       - name: Publish instrumented test results to job summary
         if: always()
@@ -452,14 +452,14 @@ jobs:
           mkdir -p "$REPORT/e2e"
           FAIL=0
 
-          # AGP writes one device-level XML per run (root <testsuites>) whose
-          # children are per-class <testsuite name="com.onfaa...VpnTunnelE2ETest">.
-          # Select the E2E suite by name instead of assuming a file name.
+          # AGP writes one device-level XML per run: a single <testsuite> root
+          # named after the first class, with <testcase classname="..."> children
+          # for every class. Select the E2E cases by classname, not by file name.
           E2E_STATUS=0
           python3 scripts/e2e/verify_instrumented_evidence.py \
             --results-dir app/build/outputs/androidTest-results \
             --out-dir "$REPORT/e2e" \
-            --suite VpnTunnelE2ETest --min-tests 3 \
+            --suite VpnTunnelE2ETest --min-tests 4 \
             > "$REPORT/e2e/verify.log" 2>&1 || E2E_STATUS=1
           cat "$REPORT/e2e/verify.log"
           cp "$REPORT/e2e/verify.log" "$REPORT/e2e/testsuite.txt"
@@ -523,7 +523,7 @@ jobs:
             echo "E2E_UUID=$E2E_UUID"
             echo "E2E_VLESS_PORT=$E2E_VLESS_PORT"
             echo "E2E_VMESS_PORT=$E2E_VMESS_PORT"
-            echo "E2E_PROBE_URL=http://onfaa.test:$E2E_HTTP_PORT/token"
+            echo "E2E_PROBE_URL=http://$E2E_ANSWER_IP:$E2E_HTTP_PORT/token"
           } > "$GITHUB_WORKSPACE/poc-report/build-env.txt"
 
       - name: Upload PoC report and artifacts

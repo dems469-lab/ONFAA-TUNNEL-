@@ -4,9 +4,13 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
+import android.os.SystemClock
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.onfaa.tunnel.MainActivity
@@ -16,11 +20,13 @@ import com.onfaa.tunnel.core.xray.XrayConfigBuilder
 import com.onfaa.tunnel.core.xray.XrayErrorSanitizer
 import com.onfaa.tunnel.data.config.TunnelConfigRepository
 import com.onfaa.tunnel.domain.model.TunnelProfile
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
@@ -50,6 +56,15 @@ class OnfaaTunnelVpnService : VpnService() {
 
         private const val CHANNEL_ID = "onfaa_tunnel"
         private const val NOTIFICATION_ID = 1001
+        private const val TAG = "OnfaaTunnel"
+
+        // Android applies the VPN link (routes, DNS) asynchronously after
+        // establish() returns, so the first probe may still resolve through the
+        // previous network. Wait for the VPN to be the app network, then retry.
+        private const val VPN_READY_TIMEOUT_MS = 15_000L
+        private const val PROBE_ATTEMPTS = 6
+        private const val PROBE_RETRY_DELAY_MS = 3_000L
+        private const val PROBE_TOTAL_TIMEOUT_MS = 40_000L
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -90,6 +105,12 @@ class OnfaaTunnelVpnService : VpnService() {
         TunnelStatusRepository.log("Connexion demandée")
 
         try {
+            // Consent first: never import a link or touch the engine when the
+            // user (or the platform) has not granted the VPN permission.
+            if (VpnService.prepare(this) != null) {
+                throw IllegalStateException("Permission VPN refusée par Android")
+            }
+
             val profile = resolveProfile(intent)
             TunnelStatusRepository.log("Configuration ${profile.protocol.name} validée")
 
@@ -98,9 +119,9 @@ class OnfaaTunnelVpnService : VpnService() {
             }
 
             val dnsEndpoint = intent.getStringExtra(EXTRA_DNS_SERVER) ?: DEFAULT_DNS_SERVER
-            val resolverEndpoint = dnsEndpoint
-                .removePrefix("tcp://")
-                .removePrefix("udp://")
+            // setDNS expects a plain host:port, without the Xray transport scheme
+            // (tcp://, tcp+local://, udp://) carried by the DNS server config.
+            val resolverEndpoint = dnsEndpoint.substringAfter("://", dnsEndpoint)
 
             // Validate with an inert descriptor first (fd 0 is a valid, harmless
             // file in the app process): testXray only constructs handlers and
@@ -120,13 +141,20 @@ class OnfaaTunnelVpnService : VpnService() {
 
             val descriptor = buildTun() ?: throw IllegalStateException("Permission VPN refusée par Android")
             tun = descriptor
+            Log.i(TAG, "TUN established")
 
+            val protectFailures = AtomicInteger(0)
             val protector: (Int) -> Boolean = { fd ->
-                try {
+                val protected = try {
                     protect(fd)
-                } catch (_: Throwable) {
+                } catch (t: Throwable) {
+                    Log.w(TAG, "VpnService.protect threw ${t.javaClass.simpleName}")
                     false
                 }
+                if (!protected && protectFailures.incrementAndGet() <= 5) {
+                    Log.w(TAG, "VpnService.protect returned false for an engine socket")
+                }
+                protected
             }
             if (!XrayBridge.registerSocketProtector(protector)) {
                 throw IllegalStateException("Impossible d'enregistrer la protection des sockets VPN")
@@ -154,7 +182,7 @@ class OnfaaTunnelVpnService : VpnService() {
             TunnelStatusRepository.set(TunnelState.Verifying)
             updateNotification("Vérification de la connectivité…")
             val probeUrl = intent.getStringExtra(EXTRA_PROBE_URL) ?: DEFAULT_PROBE_URL
-            val probe = ConnectivityProbe.check(probeUrl)
+            val probe = awaitConnectivity(probeUrl)
             if (!probe.ok) {
                 throw IllegalStateException("Tunnel démarré mais connectivité non vérifiée : ${probe.detail}")
             }
@@ -197,6 +225,46 @@ class OnfaaTunnelVpnService : VpnService() {
         TunnelStatusRepository.set(TunnelState.Idle)
         stopForegroundCompat()
         stopSelf()
+    }
+
+    /**
+     * Waits until Android reports the VPN as the app network, then probes the
+     * URL, retrying a few times. The first probe can run before netd applied
+     * the VPN link and its DNS servers, which would resolve through the
+     * previous network and fail with NXDOMAIN.
+     */
+    private suspend fun awaitConnectivity(url: String): ConnectivityProbe.Result {
+        var attempt = 1
+        var result = ConnectivityProbe.Result(false, "not attempted")
+        val deadline = SystemClock.elapsedRealtime() + PROBE_TOTAL_TIMEOUT_MS
+        while (attempt <= PROBE_ATTEMPTS && !destroyed && SystemClock.elapsedRealtime() < deadline) {
+            waitForVpnNetwork()
+            result = ConnectivityProbe.check(url, timeoutMs = 6_000)
+            Log.i(TAG, "Connectivity probe attempt $attempt/${PROBE_ATTEMPTS}: ok=${result.ok} detail=${result.detail}")
+            if (result.ok) return result
+            attempt++
+            if (attempt <= PROBE_ATTEMPTS && SystemClock.elapsedRealtime() < deadline) {
+                TunnelStatusRepository.log("Vérification reportée (${attempt}/${PROBE_ATTEMPTS}) : ${result.detail}")
+                delay(PROBE_RETRY_DELAY_MS)
+            }
+        }
+        return result
+    }
+
+    /** Blocks until the app's active network is the VPN, or the timeout ends. */
+    private suspend fun waitForVpnNetwork() {
+        val manager = getSystemService(ConnectivityManager::class.java) ?: return
+        val deadline = SystemClock.elapsedRealtime() + VPN_READY_TIMEOUT_MS
+        while (!destroyed && SystemClock.elapsedRealtime() < deadline) {
+            val network = manager.activeNetwork
+            val capabilities = network?.let { manager.getNetworkCapabilities(it) }
+            if (capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true) {
+                Log.i(TAG, "VPN network is the active network")
+                return
+            }
+            delay(200)
+        }
+        Log.w(TAG, "VPN network not active after ${VPN_READY_TIMEOUT_MS}ms")
     }
 
     private suspend fun resolveProfile(intent: Intent): TunnelProfile {

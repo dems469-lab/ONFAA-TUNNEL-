@@ -128,12 +128,14 @@ def receive_exact(connection: socket.socket, length: int) -> bytes | None:
 
 
 def handle_dns_tcp_connection(connection: socket.socket, peer: tuple[str, int], answer_ip: str) -> None:
+    log(f"DNS/TCP connection from {peer[0]}:{peer[1]}")
     with connection:
         connection.settimeout(10)
         try:
             while True:
                 header = receive_exact(connection, 2)
                 if header is None:
+                    log(f"DNS/TCP client {peer[0]}:{peer[1]} closed before sending a query")
                     return
                 length = struct.unpack("!H", header)[0]
                 packet = receive_exact(connection, length)
@@ -172,7 +174,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--http-bind", default="127.0.0.1")
     parser.add_argument("--http-port", type=int, default=18080)
-    parser.add_argument("--dns-bind", default="127.0.0.1")
+    parser.add_argument("--dns-bind", default="0.0.0.0")
     parser.add_argument("--dns-port", type=int, default=15353)
     parser.add_argument("--answer-ip", default="192.0.2.10")
     parser.add_argument("--token", required=True)

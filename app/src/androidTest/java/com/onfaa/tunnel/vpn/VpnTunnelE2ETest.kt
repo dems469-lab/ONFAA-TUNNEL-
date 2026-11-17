@@ -80,6 +80,19 @@ class VpnTunnelE2ETest {
         scenario = null
     }
 
+    /**
+     * Harness sanity check, independent of the VPN: the emulator must reach
+     * host-published ports through its 10.0.2.2 host-loopback alias. If this
+     * fails, the E2E fixture itself is unreachable and the tunnel results
+     * cannot be interpreted.
+     */
+    @Test
+    fun emulatorReachesHostFixtureThroughHostAlias() {
+        val direct = httpGet(tokenUrlOnHost(), 5_000)
+        assertEquals("host loopback alias unreachable from the emulator", 200, direct.first)
+        assertEquals(token, direct.second.trim())
+    }
+
     @Test
     fun vlessTunnelForwardsTrafficResolvesDnsAndStopsCleanly() {
         val link = vlessLink()
@@ -121,13 +134,14 @@ class VpnTunnelE2ETest {
         assertEquals("192.0.2.10", resolved.hostAddress)
 
         // Routing through the tunnel: this TEST-NET address only exists behind
-        // the local Xray server (host loopback alias).
-        val byName = httpGet(probeUrl, 15_000)
-        assertEquals(200, byName.first)
-        assertEquals(token, byName.second.trim())
-        val byIp = httpGet("http://192.0.2.10:18080/token", 15_000)
+        // the local Xray server (host loopback alias). The IP probe does not
+        // depend on DNS, the hostname probe exercises the resolver end-to-end.
+        val byIp = httpGet(probeUrl, 15_000)
         assertEquals(200, byIp.first)
         assertEquals(token, byIp.second.trim())
+        val byName = httpGet(dnsProbeUrl(), 15_000)
+        assertEquals(200, byName.first)
+        assertEquals(token, byName.second.trim())
 
         sendAction(OnfaaTunnelVpnService.ACTION_DISCONNECT)
         awaitCondition(20_000, "tunnel did not stop") {
@@ -160,6 +174,20 @@ class VpnTunnelE2ETest {
 
     private fun vmessLink(): String =
         "vmess://$uuid@$host:$vmessPort?encryption=auto&security=none&type=tcp#CI%20VMess"
+
+    /** Token endpoint addressed by DNS name, as production users would. */
+    private fun dnsProbeUrl(): String {
+        val probe = URL(probeUrl)
+        val port = if (probe.port > 0) probe.port else 80
+        return "http://onfaa.test:$port${probe.path}"
+    }
+
+    /** Same token endpoint as [probeUrl] but addressed to the host alias. */
+    private fun tokenUrlOnHost(): String {
+        val probe = URL(probeUrl)
+        val port = if (probe.port > 0) probe.port else 80
+        return "http://$host:$port${probe.path}"
+    }
 
     private fun httpGet(url: String, timeoutMs: Int): Pair<Int, String> {
         val connection = (URL(url).openConnection() as HttpURLConnection).apply {
