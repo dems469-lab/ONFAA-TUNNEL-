@@ -34,6 +34,7 @@ import com.onfaa.tunnel.feature.logs.LogsScreen
 import com.onfaa.tunnel.feature.settings.AdvancedModesScreen
 import com.onfaa.tunnel.feature.settings.AntiCensorshipSettingsScreen
 import com.onfaa.tunnel.feature.settings.AboutScreen
+import com.onfaa.tunnel.feature.settings.AppFilterSettingsScreen
 import com.onfaa.tunnel.feature.settings.AutomationSettingsScreen
 import com.onfaa.tunnel.feature.settings.ConnectionSettingsScreen
 import com.onfaa.tunnel.feature.settings.DiagnosticsSettingsScreen
@@ -189,7 +190,17 @@ fun OnfaaTunnelAppRoot() {
                         DnsSettingsScreen(onBack = { navController.popBackStackOrSettings() })
                     }
                     composable(SettingsRoutes.ROUTING) {
-                        RoutingSettingsScreen(onBack = { navController.popBackStackOrSettings() })
+                        RoutingSettingsScreen(
+                            onBack = { navController.popBackStackOrSettings() },
+                            onOpenAppFilter = {
+                                navController.navigate(SettingsRoutes.APP_FILTER) {
+                                    launchSingleTop = true
+                                }
+                            }
+                        )
+                    }
+                    composable(SettingsRoutes.APP_FILTER) {
+                        AppFilterSettingsScreen(onBack = { navController.popBackStackOrSettings() })
                     }
                     composable(SettingsRoutes.NETWORK_ENGINE) {
                         NetworkEngineScreen(onBack = { navController.popBackStackOrSettings() })

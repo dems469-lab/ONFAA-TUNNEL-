@@ -2,9 +2,11 @@
 
 ## État de phase
 
-- **Phase actuelle :** 5 — lot 3 (branchement des réglages au cœur Xray) — **livré et validé en CI**
-- **État :** les options « moteur » des Paramètres, précédemment persistées sans effet, sont désormais **réellement appliquées au moteur** par `OnfaaTunnelVpnService` au démarrage du tunnel, via le nouveau mapping `EngineSettings` : DNS/DoH choisi (config `dns` réelle + résolveur bootstrap), MTU (TUN Android + inbound tun), mux (`streamSettings.mux` sur l'outbound proxy), fragmentation TLS (outbound `freedom` + `fragment` tlshello relié par `dialerProxy`), ad blocker (règle de routage → outbound `blackhole`, liste de domaines embarquée), mode de routage (`all`/`bypass_private`/`proxy_only`), hotspot (inbound SOCKS réel `0.0.0.0:10808`), niveau de log (jamais inférieur au plancher du type de build), timeout de connexion (borne la fenêtre de vérification), délai et reconnexion automatique (cycle de vie). Le mode gaming et le comportement en arrière-plan n'ont pas d'équivalent Xray-core et restent signalés sans effet dans l'UI. L'override DNS par `EXTRA_DNS_SERVER` (tests E2E) reste prioritaire, donc les preuves E2E du lot 1 restent déterministes. Version : `versionCode 6`, `versionName 0.6.0-engine-options`.
-- **Non revendiqué (lot 3) :** appareil physique ARM64 ; changement d'IP publique ; tunnel SOCKS5 de bout en bout ; effet réel du mode gaming ; filtrage par application.
+- **Phase actuelle :** 5 — lot 4 (filtrage par application, auto-connexion réelle, abonnements) — **code livré, validation CI en cours**
+- **Non revendiqué (lot 4) :** validation CI verte et exécution E2E de ce lot (en attente des runs) ; effet réel observé sur un appareil physique ; liste d'applications vérifiée sur un grand nombre d'appareils.
+- **État (lot 4) :** trois fonctionnalités réelles livrées. **Filtrage par application :** préférences `appFilterMode` (`off`/`allow`/`block`) + `appFilterPackages`, parsing pur et validé dans `core/vpn/AppFilter` (grammaire des noms de packages, déduplication, plafond 200), application réelle par `VpnService.Builder` (`addAllowedApplication`/`addDisallowedApplication`) dans `buildTun`, sélecteur d'applications (`AppFilterSettingsScreen`, requête `MAIN`/`LAUNCHER` déclarée dans `<queries>`, sans `QUERY_ALL_PACKAGES`). **Auto-connexion :** la préférence `autoConnect`, précédemment inerte, est appliquée au lancement de l'application (`HomeScreen`, une seule tentative par session, uniquement depuis `Idle` et avec un profil complet) et au démarrage du téléphone (`BootReceiver` + `RECEIVE_BOOT_COMPLETED`, uniquement si le consentement VPN a déjà été accordé — jamais de boîte de dialogue depuis l'arrière-plan). **Abonnements :** `SubscriptionParser` pur (base64 v2ray standard/URL-safe ou liste brute, lignes non reconnues comptées), `SubscriptionImporter` (HttpURLConnection, bornes 15 s/20 s et 2 Mo, chaque lien passe par `ConfigImporter` → validation réelle du moteur), `SubscriptionStore` (DataStore, sources enregistrées, rafraîchissement et suppression), dialog « Abonnement » dans l'écran Configs. Le filtrage et l'auto-connexion ne touchent pas la configuration Xray : par défaut (`off`), le comportement reste exactement celui validé par les E2E. Version : `versionCode 7`, `versionName 0.7.0-lot4-features`.
+- **Non revendiqué (lot 3) :** appareil physique ARM64 ; changement d'IP publique ; tunnel SOCKS5 de bout en bout ; effet réel du mode gaming ; filtrage par application *(réellement livré dans le lot 4)*.
+- **Lot 3 (options moteur) :** livré et validé en CI (runs `#44225296961` et `#44225296989`, 34/34 instrumentés) — détail dans la section « Implémentation Phase 5 — lot 3 » ci-dessous.
 - **Lot 1 (protocoles) :** livré et validé — l'application importe et exécute **VLESS, VMess, Trojan, Shadowsocks et SOCKS5** avec le même moteur XTLS/Xray-core v26.11.9 (libXray v26.11.9), sans sing-box ni simulation. Le run Android CI [#44019183046](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44019183046) (commit `5e2f0d4`) est **vert** : 27 tests unitaires ; le run E2E [#44019183061](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44019183061) est **vert** : **34/34 tests instrumentés**, `VpnTunnelE2ETest` 6/6 avec tunnels réels, `ACCESS_LOG_PER_PROTOCOL_OK vless=3 vmess=3 trojan=3 shadowsocks=9`. Détail : `docs/PHASE_5_PROTOCOLS_REPORT.md`.
 - **Phase 3 :** terminée et validée en CI (tunnel réel VLESS/VMess, 21/21 instrumentés, run [#44004893595](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44004893595)) ; preuves conservées ci-dessous.
 - **Phase 2B :** terminée et validée (AAR officiel, API native, 6/6 tests instrumentés) ; preuves conservées ci-dessous.
@@ -24,6 +26,31 @@
 - **Run de confirmation (CI allégée, commit `aef515e`) :** [#44006718908](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44006718908) — `success`, 21/21 instrumentés, `vless=3 vmess=3`
 - **Dernier commit Phase 2B validé :** `f116442021b4e80508e3ef2448d21980f2207534`
 - **Run Phase 2B réussi :** [#43965698249](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/43965698249)
+
+## Implémentation Phase 5 — lot 4 (filtrage par application, auto-connexion, abonnements)
+
+### Filtrage par application (VpnService, réel)
+
+- `domain/model/UserPreferences` : `appFilterMode` (`off` par défaut / `allow` / `block`) et `appFilterPackages` (liste `\n`/`,`). `data/preferences/UserPreferencesRepository` : clés DataStore + setters.
+- `core/vpn/AppFilter` : mapping pur (mode inconnu → `off`, grammaire des noms de packages, dédoublonnage, plafond `MAX_PACKAGES = 200`, sérialisation). Testable JVM.
+- `OnfaaTunnelVpnService.buildTun(mtu, appFilter)` : `addAllowedApplication` / `addDisallowedApplication` sur le vrai `VpnService.Builder`, avant `establish()` ; rien n'est ajouté quand le mode est `off` (comportement par défaut identique aux runs verts). Ligne de journal « filtrage apps … » sans les noms de packages secrets (seul mode + nombre).
+- UI : `AppFilterSettingsScreen` (mode via `ChoiceDialog`, liste des applications lançables via `queryIntentActivities(MAIN/LAUNCHER)` + `<queries>` au manifeste, sélection persistée à la volée) ; entrée dans l'écran Routage (l'ancien avis « pas de fausse application » est remplacé par la fonction réelle) et dans la recherche des Paramètres.
+
+### Auto-connexion réelle
+
+- `HomeScreen` : effet de lancement unique (`rememberSaveable` anti-rebond) — tentative uniquement depuis `Idle`, avec profil sélectionné complet et moteur disponible ; la boîte de consentement Android reste possible (jamais contournée).
+- `vpn/BootReceiver` + permission `RECEIVE_BOOT_COMPLETED` : au `BOOT_COMPLETED`, lecture asynchrone des préférences ; connexion lancée seulement si `autoConnect`, un profil est sélectionné, l'état est `Idle`/`Error` et `VpnService.prepare` renvoie `null` (consentement déjà accordé) ; chaque refus est journalisé.
+
+### Abonnements
+
+- `data/subscription/SubscriptionParser` : base64 v2ray (standard ou URL-safe, padding optionnel) ou liste brute ; seuls les schémas `vless/vmess/trojan/ss/socks` sont retenus, le reste est compté comme ignoré ; base64 illisible → `SubscriptionException` lisible.
+- `data/subscription/SubscriptionImporter` : `HttpURLConnection` (http/https uniquement, timeouts 15/20 s, plafond 2 Mo), chaque lien est importé par `ConfigImporter.importLink` (structure + `testXray` réel) ; le rapport compte importés/refusés/ignorés, zéro profil inventé ; la source est enregistrée dans `SubscriptionStore` (DataStore, clé par URL, plafond 20 sources).
+- UI : `ConfigActionButton` « Abonnement (URL) » → `SubscriptionDialog` (URL + nom, import, liste des sources avec rafraîchissement et suppression).
+
+### Tests du lot 4
+
+- Unitaires JVM : `AppFilterTest` (8 : défauts, repli de mode, parsing `\n`/`,`, dédoublonnage, entrées invalides non fatales, grammaire, plafond, aller-retour `allow`), `SubscriptionParserTest` (6 : liste brute, base64, URL-safe sans padding, vide, base64 invalide, schémas filtrés).
+- Instrumentés (nécessitent l'AAR, saignés par `assumeTrue`) : `VpnTunnelE2ETest` + `allowOnlySelfTunnelStillForwardsRealTraffic` (l'app seule autorisée : la fixture — joignable uniquement à travers le tunnel — reste joignable, donc `addAllowedApplication` est réellement appliqué) et `blockSelfBypassesTheTunnelForThisApp` (l'app exclue : tunnel connecté mais socket de l'app contournant le VPN, la fixture devient injoignable) ; `SubscriptionImportInstrumentedTest` (4 : serveur HTTP local réel, base64 + validation moteur, liste brute, HTTP 404 lisible, abonnement sans lien exploitable rejeté).
 
 ## Implémentation Phase 5 — lot 3 (branchement des réglages au cœur, livré et validé)
 

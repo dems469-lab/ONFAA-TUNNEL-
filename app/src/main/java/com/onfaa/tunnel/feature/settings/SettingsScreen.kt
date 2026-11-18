@@ -13,6 +13,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Article
 import androidx.compose.material.icons.filled.Bolt
@@ -47,6 +48,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.onfaa.tunnel.core.vpn.AppFilter
 import com.onfaa.tunnel.domain.model.UserPreferences
 import com.onfaa.tunnel.onfaaAppContainer
 import com.onfaa.tunnel.ui.components.DividerLine
@@ -96,6 +98,7 @@ fun SettingsScreen(
             SettingsSearchEntry("Advanced Modes", "Ad blocker, gaming", Icons.Filled.Bolt, SettingsRoutes.ADVANCED_MODES),
             SettingsSearchEntry("DNS", "DoH, serveur DNS", Icons.Filled.Dns, SettingsRoutes.DNS),
             SettingsSearchEntry("Routage", "Applications et réseaux", Icons.Filled.Route, SettingsRoutes.ROUTING),
+            SettingsSearchEntry("Filtrage par application", "Tunnel par application", Icons.Filled.Apps, SettingsRoutes.APP_FILTER),
             SettingsSearchEntry("Moteur réseau", "MTU, mux, gVisor", Icons.Filled.Memory, SettingsRoutes.NETWORK_ENGINE),
             SettingsSearchEntry("Partage hotspot", "Proxy pour le partage", Icons.Filled.WifiTethering, SettingsRoutes.HOTSPOT),
             SettingsSearchEntry("Apparence", "Thèmes et mode d'affichage", Icons.Filled.Palette, SettingsRoutes.APPEARANCE),
@@ -341,6 +344,14 @@ fun SettingsScreen(
                 )
                 DividerLine(inset = 14.dp)
                 SettingRow(
+                    icon = Icons.Filled.Apps,
+                    title = "Filtrage par application",
+                    subtitle = appFilterLabel(prefs),
+                    iconTint = palette.success,
+                    onClick = { onNavigate(SettingsRoutes.APP_FILTER) }
+                )
+                DividerLine(inset = 14.dp)
+                SettingRow(
                     icon = Icons.Filled.Memory,
                     title = "Moteur réseau",
                     subtitle = "MTU ${prefs.mtu} · Mux ${if (prefs.muxEnabled) "on" else "off"}",
@@ -425,4 +436,13 @@ private fun routingLabel(value: String): String = when (value) {
     "bypass_private" -> "Contourner les réseaux privés"
     "proxy_only" -> "Proxy uniquement"
     else -> "Toutes les applications"
+}
+
+private fun appFilterLabel(prefs: UserPreferences): String {
+    val count = AppFilter.parsePackages(prefs.appFilterPackages).size
+    return when {
+        prefs.appFilterMode == AppFilter.MODE_ALLOW && count > 0 -> "$count application(s) autorisée(s)"
+        prefs.appFilterMode == AppFilter.MODE_BLOCK && count > 0 -> "$count application(s) exclue(s)"
+        else -> "Désactivé"
+    }
 }

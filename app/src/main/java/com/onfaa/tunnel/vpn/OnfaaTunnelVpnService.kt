@@ -18,6 +18,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.onfaa.tunnel.MainActivity
 import com.onfaa.tunnel.R
+import com.onfaa.tunnel.core.vpn.AppFilter
 import com.onfaa.tunnel.core.xray.EngineSettings
 import com.onfaa.tunnel.core.xray.XrayBridge
 import com.onfaa.tunnel.core.xray.XrayConfigBuilder
@@ -160,6 +161,7 @@ class OnfaaTunnelVpnService : VpnService() {
                 preferences = prefs,
                 logLevelFloor = if (isDebuggable) "info" else XrayConfigBuilder.DEFAULT_LOG_LEVEL
             )
+            val appFilter = AppFilter.from(prefs)
             val dnsEndpoints = dnsEndpointExtra?.let { listOf(it) } ?: settings.dnsEndpoints
             // setDNS expects a plain host:port, without the Xray transport scheme
             // (tcp://, tcp+local://, udp://, https://) carried by the DNS config.
@@ -173,7 +175,8 @@ class OnfaaTunnelVpnService : VpnService() {
                     "mux ${if (settings.muxEnabled) "on" else "off"} · " +
                     "fragmentation ${if (settings.tlsFragment) "on" else "off"} · " +
                     "adblock ${if (settings.adBlock) "on" else "off"} · " +
-                    "hotspot ${if (settings.hotspotSharing) "on" else "off"}",
+                    "hotspot ${if (settings.hotspotSharing) "on" else "off"} · " +
+                    "filtrage apps ${if (appFilter.isActive) "${appFilter.mode}(${appFilter.packages.size})" else "off"}",
                 LogSeverity.INFO
             )
 
@@ -204,7 +207,8 @@ class OnfaaTunnelVpnService : VpnService() {
                 )
             }
 
-            val descriptor = buildTun(settings.mtu) ?: throw IllegalStateException("Permission VPN refusée par Android")
+            val descriptor = buildTun(settings.mtu, appFilter)
+                ?: throw IllegalStateException("Permission VPN refusée par Android")
             tun = descriptor
             Log.i(TAG, "TUN established")
             TunnelStatusRepository.set(TunnelState.Connecting)
@@ -532,7 +536,7 @@ class OnfaaTunnelVpnService : VpnService() {
     private val isDebuggable: Boolean
         get() = (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
 
-    private fun buildTun(mtu: Int): ParcelFileDescriptor? {
+    private fun buildTun(mtu: Int, appFilter: AppFilter.Settings): ParcelFileDescriptor? {
         val builder = Builder()
             .setSession("ONFAA TUNNEL")
             .setMtu(mtu)
@@ -542,6 +546,21 @@ class OnfaaTunnelVpnService : VpnService() {
             .addAddress("fd00::2", 64)
             .addDnsServer("fd00::1")
             .addRoute("::", 0)
+        // Real per-application split tunneling. Nothing is added when the
+        // mode is off or the list is empty, so the default behavior stays
+        // exactly the previously validated full-tunnel configuration.
+        if (appFilter.isActive) {
+            when (appFilter.mode) {
+                AppFilter.MODE_ALLOW -> appFilter.packages.forEach {
+                    builder.addAllowedApplication(it)
+                    Log.i(TAG, "App filter allow: $it")
+                }
+                AppFilter.MODE_BLOCK -> appFilter.packages.forEach {
+                    builder.addDisallowedApplication(it)
+                    Log.i(TAG, "App filter block: $it")
+                }
+            }
+        }
         return try {
             builder.establish()
         } catch (failure: Throwable) {

@@ -10,7 +10,9 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.onfaa.tunnel.MainActivity
+import com.onfaa.tunnel.core.vpn.AppFilter
 import com.onfaa.tunnel.core.xray.XrayBridge
+import com.onfaa.tunnel.onfaaAppContainer
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -128,6 +130,57 @@ class VpnTunnelE2ETest {
         val link = ssLink()
         assertDirectTrafficFails()
         runTunnelScenario(link)
+    }
+
+    /**
+     * Real per-application split tunneling, allowed side: the test app is the
+     * only package allowed into the VPN. If the filter were not applied by the
+     * platform builder, nothing would change; if it were applied wrongly
+     * (excluding the app), its own sockets would bypass the tunnel and the
+     * fixture, which is only reachable through it, would be unreachable.
+     */
+    @Test
+    fun allowOnlySelfTunnelStillForwardsRealTraffic() {
+        setAppFilter(AppFilter.MODE_ALLOW, listOf(context.packageName))
+        try {
+            runTunnelScenario(vlessLink())
+        } finally {
+            setAppFilter(AppFilter.MODE_OFF, emptyList())
+        }
+    }
+
+    /**
+     * Real per-application split tunneling, excluded side: the test app is
+     * excluded from the VPN. The tunnel itself still connects, but this app's
+     * sockets bypass it, so the fixture (reachable only through the tunnel)
+     * must become unreachable from the test process — the observable,
+     * honest proof that addDisallowedApplication was really applied.
+     */
+    @Test
+    fun blockSelfBypassesTheTunnelForThisApp() {
+        setAppFilter(AppFilter.MODE_BLOCK, listOf(context.packageName))
+        try {
+            sendConnect(vlessLink())
+            awaitCondition(90_000, "tunnel did not connect") {
+                TunnelStatusRepository.state.value is TunnelState.Connected
+            }
+            val bypassed = runCatching { httpGet(probeUrl, 3_000) }
+            assertTrue("excluded app reached the fixture directly: $bypassed", bypassed.isFailure)
+            sendAction(OnfaaTunnelVpnService.ACTION_DISCONNECT)
+            awaitCondition(20_000, "tunnel did not stop") {
+                TunnelStatusRepository.state.value is TunnelState.Idle
+            }
+        } finally {
+            setAppFilter(AppFilter.MODE_OFF, emptyList())
+        }
+    }
+
+    private fun setAppFilter(mode: String, packages: List<String>) {
+        runBlocking {
+            val repository = context.onfaaAppContainer.userPreferencesRepository
+            repository.setAppFilterMode(mode)
+            repository.setAppFilterPackages(AppFilter.serializePackages(packages))
+        }
     }
 
     @Test

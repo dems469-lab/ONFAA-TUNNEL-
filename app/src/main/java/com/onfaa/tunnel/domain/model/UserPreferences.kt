@@ -30,5 +30,16 @@ data class UserPreferences(
     val mtu: Int = 1500,
     val muxEnabled: Boolean = false,
     val hotspotSharing: Boolean = false,
-    val logLevel: String = "warning"
+    val logLevel: String = "warning",
+    /**
+     * Real per-application split tunneling applied by the VpnService.Builder
+     * (addAllowedApplication / addDisallowedApplication), not by the Xray
+     * routing layer. [appFilterMode] is "off" (default), "allow" (only the
+     * listed packages go through the tunnel) or "block" (listed packages go
+     * around the tunnel). [appFilterPackages] is a newline/comma separated
+     * package-name list; parsing and validation live in
+     * [com.onfaa.tunnel.core.vpn.AppFilter].
+     */
+    val appFilterMode: String = "off",
+    val appFilterPackages: String = ""
 )

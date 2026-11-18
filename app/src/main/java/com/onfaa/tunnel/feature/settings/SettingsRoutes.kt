@@ -6,6 +6,7 @@ object SettingsRoutes {
     const val ADVANCED_MODES = "settings/advanced-modes"
     const val DNS = "settings/dns"
     const val ROUTING = "settings/routing"
+    const val APP_FILTER = "settings/app-filter"
     const val NETWORK_ENGINE = "settings/network-engine"
     const val HOTSPOT = "settings/hotspot"
     const val AUTOMATION = "settings/automation"

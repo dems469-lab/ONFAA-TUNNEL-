@@ -5,6 +5,7 @@ import android.content.Context
 import androidx.datastore.preferences.preferencesDataStore
 import com.onfaa.tunnel.data.config.TunnelConfigRepository
 import com.onfaa.tunnel.data.preferences.UserPreferencesRepository
+import com.onfaa.tunnel.data.subscription.SubscriptionStore
 import com.onfaa.tunnel.vpn.LogSeverity
 import com.onfaa.tunnel.vpn.TunnelStatusRepository
 
@@ -15,6 +16,8 @@ private val Context.userPreferencesDataStore by preferencesDataStore(
 /** Small manual container; the project deliberately avoids a DI framework. */
 class AppContainer(context: Context) {
     val userPreferencesRepository = UserPreferencesRepository(context.userPreferencesDataStore)
+
+    val subscriptionStore = SubscriptionStore(context.userPreferencesDataStore)
 }
 
 class OnfaaTunnelApp : Application() {

@@ -40,10 +40,12 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.QrCode2
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
+import androidx.compose.material.icons.filled.Subscriptions
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material3.AlertDialog
@@ -78,7 +80,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.onfaa.tunnel.data.config.LatencyRepository
 import com.onfaa.tunnel.data.config.LatencyResult
 import com.onfaa.tunnel.data.config.TunnelConfigRepository
+import com.onfaa.tunnel.data.subscription.SubscriptionException
+import com.onfaa.tunnel.data.subscription.SubscriptionImportReport
+import com.onfaa.tunnel.data.subscription.SubscriptionImporter
 import com.onfaa.tunnel.domain.model.TunnelProfile
+import com.onfaa.tunnel.onfaaAppContainer
 import com.onfaa.tunnel.ui.components.Chevron
 import com.onfaa.tunnel.ui.components.GlassCard
 import com.onfaa.tunnel.ui.components.GradientButton
@@ -132,6 +138,7 @@ fun ConfigsScreen(onBack: () -> Unit) {
     var testingAll by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    var subscriptionOpen by remember { mutableStateOf(false) }
 
     val visible = profiles
         .filter { profile ->
@@ -335,6 +342,13 @@ fun ConfigsScreen(onBack: () -> Unit) {
                 enabled = profiles.isNotEmpty() && !testingAll,
                 modifier = Modifier.weight(1f)
             )
+            ConfigActionButton(
+                icon = Icons.Filled.Subscriptions,
+                label = "Abonnement\n(URL)",
+                onClick = { subscriptionOpen = true },
+                enabled = true,
+                modifier = Modifier.weight(1f)
+            )
         }
 
         if (testingAll) {
@@ -441,6 +455,17 @@ fun ConfigsScreen(onBack: () -> Unit) {
             onImported = { imported ->
                 importOpen = false
                 notice = "Configuration ${imported.protocol.name} validée et ajoutée."
+                error = null
+            }
+        )
+    }
+
+    if (subscriptionOpen) {
+        SubscriptionDialog(
+            onDismiss = { subscriptionOpen = false },
+            onImported = { report ->
+                notice = "Abonnement : ${report.imported} profil(s) importé(s)" +
+                    if (report.failed > 0) ", ${report.failed} refusé(s) par le moteur." else "."
                 error = null
             }
         )
@@ -1063,3 +1088,194 @@ private fun readTextFile(context: Context, uri: Uri): String? = runCatching {
         bytes.toString(Charsets.UTF_8)
     }
 }.getOrNull()
+
+@Composable
+private fun SubscriptionDialog(
+    onDismiss: () -> Unit,
+    onImported: (SubscriptionImportReport) -> Unit
+) {
+    val palette = OnfaaTheme.colors
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val store = remember { context.onfaaAppContainer.subscriptionStore }
+    val sources by store.sources.collectAsStateWithLifecycle(initialValue = emptyList())
+    var url by remember { mutableStateOf("") }
+    var name by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    fun runImport(targetUrl: String, label: String?) {
+        val trimmed = targetUrl.trim()
+        if (trimmed.isBlank() || busy) return
+        if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
+            error = "L'URL doit commencer par http:// ou https://"
+            return
+        }
+        busy = true
+        error = null
+        scope.launch {
+            try {
+                val report = SubscriptionImporter.import(
+                    url = trimmed,
+                    name = label?.trim()?.takeIf { it.isNotBlank() },
+                    store = store
+                )
+                busy = false
+                onImported(report)
+            } catch (failure: SubscriptionException) {
+                busy = false
+                error = failure.message ?: "Import de l'abonnement impossible"
+            } catch (failure: Throwable) {
+                busy = false
+                error = "Import de l'abonnement impossible : ${failure.javaClass.simpleName}"
+            }
+        }
+    }
+
+    Dialog(onDismissRequest = { if (!busy) onDismiss() }) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(24.dp))
+                .background(palette.surface)
+                .border(1.dp, palette.border, RoundedCornerShape(24.dp))
+                .verticalScroll(rememberScrollState())
+                .padding(20.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "Abonnement",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = palette.textPrimary,
+                    modifier = Modifier.weight(1f)
+                )
+                IconButton(onClick = onDismiss, enabled = !busy) {
+                    Icon(
+                        imageVector = Icons.Filled.Close,
+                        contentDescription = "Fermer",
+                        tint = palette.textMuted
+                    )
+                }
+            }
+            Text(
+                text = "Chaque lien de l'abonnement (base64 v2ray ou liste brute) est importé " +
+                    "et validé par le moteur Xray, exactement comme un import manuel.",
+                style = MaterialTheme.typography.bodySmall,
+                color = palette.textSecondary
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            OutlinedTextField(
+                value = url,
+                onValueChange = {
+                    url = it
+                    error = null
+                },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                label = { Text("URL de l'abonnement (http/https)") },
+                shape = RoundedCornerShape(14.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = palette.primary,
+                    unfocusedBorderColor = palette.border,
+                    cursorColor = palette.primary,
+                    focusedTextColor = palette.textPrimary,
+                    unfocusedTextColor = palette.textPrimary
+                )
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                label = { Text("Nom (optionnel)") },
+                shape = RoundedCornerShape(14.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = palette.primary,
+                    unfocusedBorderColor = palette.border,
+                    cursorColor = palette.primary,
+                    focusedTextColor = palette.textPrimary,
+                    unfocusedTextColor = palette.textPrimary
+                )
+            )
+            error?.let {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = palette.danger
+                )
+            }
+            Spacer(modifier = Modifier.height(14.dp))
+            GradientButton(
+                text = if (busy) "Import en cours…" else "Importer l'abonnement",
+                icon = Icons.Filled.Subscriptions,
+                loading = busy,
+                enabled = url.isNotBlank() && !busy,
+                onClick = { runImport(url, name) }
+            )
+            if (sources.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(14.dp))
+                Text(
+                    text = "Abonnements enregistrés",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = palette.textPrimary
+                )
+                sources.forEach { source ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = source.name,
+                                style = MaterialTheme.typography.titleSmall,
+                                color = palette.textPrimary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = "${source.url} · ${source.lastProfileCount} profil(s)",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = palette.textMuted,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        IconButton(
+                            onClick = { runImport(source.url, source.name) },
+                            enabled = !busy
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Refresh,
+                                contentDescription = "Rafraîchir",
+                                tint = palette.primary
+                            )
+                        }
+                        IconButton(
+                            onClick = {
+                                scope.launch { store.remove(source.url) }
+                            },
+                            enabled = !busy
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Delete,
+                                contentDescription = "Supprimer",
+                                tint = palette.danger
+                            )
+                        }
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+            Text(
+                text = "Les profils importés suivent le même stockage chiffré que les " +
+                    "imports manuels ; l'URL de l'abonnement est conservée localement.",
+                style = MaterialTheme.typography.labelSmall,
+                color = palette.textMuted
+            )
+        }
+    }
+}

@@ -36,7 +36,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -50,6 +52,8 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.onfaa.tunnel.core.xray.XrayBridge
 import com.onfaa.tunnel.data.config.TunnelConfigRepository
+import com.onfaa.tunnel.domain.model.UserPreferences
+import com.onfaa.tunnel.onfaaAppContainer
 import com.onfaa.tunnel.domain.model.TunnelProfile
 import com.onfaa.tunnel.ui.components.BrandHeader
 import com.onfaa.tunnel.ui.components.Chevron
@@ -93,6 +97,8 @@ fun HomeScreen(
     val profiles by TunnelConfigRepository.profiles.collectAsStateWithLifecycle()
     val selectedId by TunnelConfigRepository.selectedId.collectAsStateWithLifecycle()
     val selected = profiles.firstOrNull { it.id == selectedId }
+    val repository = remember { context.onfaaAppContainer.userPreferencesRepository }
+    val prefs by repository.preferences.collectAsStateWithLifecycle(initialValue = UserPreferences())
     // A build without the pinned libXray AAR can never open a tunnel. Detecting
     // it here explains the failure instead of letting each connect attempt end
     // with a generic engine error.
@@ -137,6 +143,21 @@ fun HomeScreen(
         }
         val consent = VpnService.prepare(context)
         if (consent != null) permissionLauncher.launch(consent) else startTunnel(context)
+    }
+
+    // Real auto-connect at application launch: exactly one attempt per
+    // session, only from the idle state, only with a complete selected
+    // profile. The VPN consent dialog may still be shown by the platform —
+    // this effect never bypasses it.
+    var autoConnectAttempted by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(prefs.autoConnect, selected?.id, engineAvailable, state) {
+        if (autoConnectAttempted) return@LaunchedEffect
+        if (!prefs.autoConnect || !engineAvailable) return@LaunchedEffect
+        val profile = selected ?: return@LaunchedEffect
+        if (profile.incomplete) return@LaunchedEffect
+        if (state !is TunnelState.Idle) return@LaunchedEffect
+        autoConnectAttempted = true
+        requestConnect()
     }
 
     val busy = state is TunnelState.Connecting ||

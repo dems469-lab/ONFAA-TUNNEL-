@@ -34,7 +34,9 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
             mtu = prefs[MTU] ?: defaults.mtu,
             muxEnabled = prefs[MUX_ENABLED] ?: defaults.muxEnabled,
             hotspotSharing = prefs[HOTSPOT] ?: defaults.hotspotSharing,
-            logLevel = prefs[LOG_LEVEL] ?: defaults.logLevel
+            logLevel = prefs[LOG_LEVEL] ?: defaults.logLevel,
+            appFilterMode = prefs[APP_FILTER_MODE] ?: defaults.appFilterMode,
+            appFilterPackages = prefs[APP_FILTER_PACKAGES] ?: defaults.appFilterPackages
         )
     }
 
@@ -86,6 +88,12 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
 
     suspend fun setLogLevel(value: String) = dataStore.edit { it[LOG_LEVEL] = value }
 
+    suspend fun setAppFilterMode(value: String) =
+        dataStore.edit { it[APP_FILTER_MODE] = value }
+
+    suspend fun setAppFilterPackages(value: String) =
+        dataStore.edit { it[APP_FILTER_PACKAGES] = value }
+
     private companion object {
         val THEME_KEY = stringPreferencesKey("theme_key")
         val THEME_MODE = stringPreferencesKey("theme_mode")
@@ -107,5 +115,7 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
         val MUX_ENABLED = booleanPreferencesKey("mux_enabled")
         val HOTSPOT = booleanPreferencesKey("hotspot_sharing")
         val LOG_LEVEL = stringPreferencesKey("log_level")
+        val APP_FILTER_MODE = stringPreferencesKey("app_filter_mode")
+        val APP_FILTER_PACKAGES = stringPreferencesKey("app_filter_packages")
     }
 }

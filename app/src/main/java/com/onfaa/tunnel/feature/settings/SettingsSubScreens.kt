@@ -1,5 +1,6 @@
 package com.onfaa.tunnel.feature.settings
 
+import android.content.Intent
 import android.os.Build
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -20,6 +21,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Article
 import androidx.compose.material.icons.filled.Autorenew
 import androidx.compose.material.icons.filled.Block
@@ -61,6 +63,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.onfaa.tunnel.BuildConfig
+import com.onfaa.tunnel.core.vpn.AppFilter
 import com.onfaa.tunnel.core.xray.XrayBridge
 import com.onfaa.tunnel.core.xray.XrayConfigBuilder
 import com.onfaa.tunnel.data.config.TunnelConfigRepository
@@ -547,7 +550,10 @@ fun DnsSettingsScreen(onBack: () -> Unit) {
 }
 
 @Composable
-fun RoutingSettingsScreen(onBack: () -> Unit) {
+fun RoutingSettingsScreen(
+    onBack: () -> Unit,
+    onOpenAppFilter: () -> Unit
+) {
     val controller = rememberSettingsController()
     val prefs = controller.prefs
     var showModes by remember { mutableStateOf(false) }
@@ -588,12 +594,22 @@ fun RoutingSettingsScreen(onBack: () -> Unit) {
             )
         }
         Spacer(modifier = Modifier.height(16.dp))
-        InfoCard(
-            title = "Pas de fausse application",
-            message = "Aucune liste d'applications n'est affichée tant que le filtrage par " +
-                "application n'est pas réellement implémenté dans le service.",
-            icon = Icons.Filled.Info
-        )
+        SettingsGroup(title = "Filtrage par application", icon = Icons.Filled.Apps) {
+            SettingRow(
+                icon = Icons.Filled.Apps,
+                title = "Applications",
+                subtitle = "Tunnel réel par application (VpnService)",
+                value = when {
+                    prefs.appFilterMode == AppFilter.MODE_ALLOW ->
+                        "${AppFilter.parsePackages(prefs.appFilterPackages).size} autorisée(s)"
+                    prefs.appFilterMode == AppFilter.MODE_BLOCK ->
+                        "${AppFilter.parsePackages(prefs.appFilterPackages).size} exclue(s)"
+                    else -> "Désactivé"
+                },
+                iconTint = palette.success,
+                onClick = onOpenAppFilter
+            )
+        }
     }
     if (showModes) {
         ChoiceDialog(
@@ -720,13 +736,22 @@ fun AutomationSettingsScreen(onBack: () -> Unit) {
             SettingSwitchRow(
                 icon = Icons.Filled.Link,
                 title = "Connexion automatique",
-                subtitle = "Se connecter au démarrage de l'application",
+                subtitle = "Au lancement de l'application et au démarrage du téléphone",
                 checked = prefs.autoConnect,
                 onCheckedChange = {
                     controller.scope.launch { controller.repository.setAutoConnect(it) }
                 }
             )
         }
+        Spacer(modifier = Modifier.height(16.dp))
+        InfoCard(
+            title = "Application réelle",
+            message = "La connexion automatique part au lancement de l'application et, si le " +
+                "consentement VPN Android a déjà été accordé, au démarrage du téléphone " +
+                "(récepteur BOOT_COMPLETED). Sans configuration sélectionnée ou sans " +
+                "consentement, elle est ignorée et notée dans les journaux.",
+            icon = Icons.Filled.Link
+        )
         Spacer(modifier = Modifier.height(16.dp))
         InfoCard(
             title = "Deep links",
@@ -988,6 +1013,154 @@ private fun AboutLine(label: String, value: String) {
             color = palette.textPrimary,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+private data class InstalledAppEntry(
+    val packageName: String,
+    val label: String,
+    val isSelf: Boolean
+)
+
+private fun queryLaunchableApps(context: Context): List<InstalledAppEntry> {
+    val packageManager = context.packageManager
+    val launcher = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+    return packageManager.queryIntentActivities(launcher, 0)
+        .mapNotNull { info ->
+            val pkg = info.activityInfo?.packageName?.takeIf { it.isNotBlank() }
+                ?: return@mapNotNull null
+            InstalledAppEntry(
+                packageName = pkg,
+                label = info.loadLabel(packageManager).toString().ifBlank { pkg },
+                isSelf = pkg == context.packageName
+            )
+        }
+        .distinctBy { it.packageName }
+        .sortedBy { it.label.lowercase() }
+}
+
+@Composable
+fun AppFilterSettingsScreen(onBack: () -> Unit) {
+    val controller = rememberSettingsController()
+    val prefs = controller.prefs
+    val context = LocalContext.current
+    val palette = OnfaaTheme.colors
+    var showModes by remember { mutableStateOf(false) }
+
+    val installedApps = remember { queryLaunchableApps(context) }
+    val selectedPackages = remember(prefs.appFilterPackages) {
+        AppFilter.parsePackages(prefs.appFilterPackages).toSet()
+    }
+
+    fun togglePackage(pkg: String) {
+        val updated = if (pkg in selectedPackages) {
+            selectedPackages - pkg
+        } else {
+            if (selectedPackages.size >= AppFilter.MAX_PACKAGES) return
+            selectedPackages + pkg
+        }
+        val serialized = AppFilter.serializePackages(updated.sorted())
+        controller.scope.launch {
+            controller.repository.setAppFilterPackages(serialized)
+        }
+    }
+
+    SettingsDetailScaffold(
+        title = "Filtrage par application",
+        subtitle = "Tunnel réel par application",
+        onBack = onBack
+    ) {
+        SettingsGroup(title = "Mode de filtrage", icon = Icons.Filled.Apps) {
+            SettingRow(
+                icon = Icons.Filled.Apps,
+                title = "Mode",
+                value = when (prefs.appFilterMode) {
+                    AppFilter.MODE_ALLOW -> "Autoriser la liste"
+                    AppFilter.MODE_BLOCK -> "Exclure la liste"
+                    else -> "Désactivé"
+                },
+                iconTint = palette.success,
+                onClick = { showModes = true }
+            )
+        }
+        Spacer(modifier = Modifier.height(14.dp))
+        GlassCard {
+            Text(
+                text = "Application réelle",
+                style = MaterialTheme.typography.titleSmall,
+                color = palette.textPrimary
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = "Le filtrage est appliqué par le service VPN Android lui-même " +
+                    "(VpnService) à la prochaine connexion : « Autoriser la liste » " +
+                    "ne capture que les applications choisies, « Exclure la liste » " +
+                    "capture tout sauf celles choisies. Mode désactivé = tout le " +
+                    "trafic passe par le tunnel.",
+                style = MaterialTheme.typography.bodySmall,
+                color = palette.textSecondary
+            )
+        }
+        Spacer(modifier = Modifier.height(16.dp))
+        SettingsGroup(title = "Applications installées", icon = Icons.Filled.Bolt) {
+            if (prefs.appFilterMode == AppFilter.MODE_OFF) {
+                InfoCard(
+                    title = "Mode désactivé",
+                    message = "Activez « Autoriser la liste » ou « Exclure la liste » " +
+                        "pour que la sélection ci-dessous ait un effet réel.",
+                    icon = Icons.Filled.Info
+                )
+            }
+            installedApps.forEach { app ->
+                SettingRow(
+                    icon = Icons.Filled.Bolt,
+                    title = app.label,
+                    subtitle = app.packageName,
+                    iconTint = if (app.isSelf) palette.success else palette.textSecondary,
+                    onClick = { togglePackage(app.packageName) },
+                    trailing = {
+                        Text(
+                            text = if (app.packageName in selectedPackages) "Sélectionnée" else "",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = palette.primary
+                        )
+                    }
+                )
+                DividerLine(inset = 14.dp)
+            }
+        }
+        if (selectedPackages.isNotEmpty()) {
+            InfoCard(
+                title = "Sélection enregistrée",
+                message = "${selectedPackages.size} application(s) sélectionnée(s) · " +
+                    "appliquée à la prochaine connexion.",
+                icon = Icons.Filled.CheckCircle
+            )
+        }
+    }
+    if (showModes) {
+        ChoiceDialog(
+            title = "Mode de filtrage",
+            options = listOf(
+                ChoiceOption(AppFilter.MODE_OFF, "Désactivé", "Tout le trafic passe par le tunnel"),
+                ChoiceOption(
+                    AppFilter.MODE_ALLOW,
+                    "Autoriser la liste",
+                    "Seules les applications sélectionnées passent par le tunnel"
+                ),
+                ChoiceOption(
+                    AppFilter.MODE_BLOCK,
+                    "Exclure la liste",
+                    "Les applications sélectionnées contournent le tunnel"
+                )
+            ),
+            selected = prefs.appFilterMode,
+            onDismiss = { showModes = false },
+            onSelect = {
+                controller.scope.launch { controller.repository.setAppFilterMode(it.value) }
+                showModes = false
+            }
         )
     }
 }
