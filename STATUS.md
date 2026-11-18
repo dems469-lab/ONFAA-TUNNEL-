@@ -2,9 +2,9 @@
 
 ## État de phase
 
-- **Phase actuelle :** 5 — lot 3 (branchement des réglages au cœur Xray) — **code livré, validation CI en cours**
+- **Phase actuelle :** 5 — lot 3 (branchement des réglages au cœur Xray) — **livré et validé en CI**
 - **État :** les options « moteur » des Paramètres, précédemment persistées sans effet, sont désormais **réellement appliquées au moteur** par `OnfaaTunnelVpnService` au démarrage du tunnel, via le nouveau mapping `EngineSettings` : DNS/DoH choisi (config `dns` réelle + résolveur bootstrap), MTU (TUN Android + inbound tun), mux (`streamSettings.mux` sur l'outbound proxy), fragmentation TLS (outbound `freedom` + `fragment` tlshello relié par `dialerProxy`), ad blocker (règle de routage → outbound `blackhole`, liste de domaines embarquée), mode de routage (`all`/`bypass_private`/`proxy_only`), hotspot (inbound SOCKS réel `0.0.0.0:10808`), niveau de log (jamais inférieur au plancher du type de build), timeout de connexion (borne la fenêtre de vérification), délai et reconnexion automatique (cycle de vie). Le mode gaming et le comportement en arrière-plan n'ont pas d'équivalent Xray-core et restent signalés sans effet dans l'UI. L'override DNS par `EXTRA_DNS_SERVER` (tests E2E) reste prioritaire, donc les preuves E2E du lot 1 restent déterministes. Version : `versionCode 6`, `versionName 0.6.0-engine-options`.
-- **Non revendiqué (lot 3) :** validation CI verte et exécution E2E de ce lot (en attente des runs ; itération 1 : erreur de compilation corrigée par `1a4b699`, itération 2 : test unitaire trop large corrigé) ; appareil physique ARM64 ; changement d'IP publique ; tunnel SOCKS5 de bout en bout ; effet réel du mode gaming ; filtrage par application.
+- **Non revendiqué (lot 3) :** appareil physique ARM64 ; changement d'IP publique ; tunnel SOCKS5 de bout en bout ; effet réel du mode gaming ; filtrage par application.
 - **Lot 1 (protocoles) :** livré et validé — l'application importe et exécute **VLESS, VMess, Trojan, Shadowsocks et SOCKS5** avec le même moteur XTLS/Xray-core v26.11.9 (libXray v26.11.9), sans sing-box ni simulation. Le run Android CI [#44019183046](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44019183046) (commit `5e2f0d4`) est **vert** : 27 tests unitaires ; le run E2E [#44019183061](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44019183061) est **vert** : **34/34 tests instrumentés**, `VpnTunnelE2ETest` 6/6 avec tunnels réels, `ACCESS_LOG_PER_PROTOCOL_OK vless=3 vmess=3 trojan=3 shadowsocks=9`. Détail : `docs/PHASE_5_PROTOCOLS_REPORT.md`.
 - **Phase 3 :** terminée et validée en CI (tunnel réel VLESS/VMess, 21/21 instrumentés, run [#44004893595](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44004893595)) ; preuves conservées ci-dessous.
 - **Phase 2B :** terminée et validée (AAR officiel, API native, 6/6 tests instrumentés) ; preuves conservées ci-dessous.
@@ -15,6 +15,8 @@
 - **Branche principale :** `main`
 - **Commit Phase 5 (lot 1 protocoles) :** `5e2f0d4`
 - **Runs CI Phase 5 (lot 1) :** [Android CI #44019183046](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44019183046) — `success`, 27 tests unitaires ; [E2E #44019183061](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44019183061) — `success`, 34/34 instrumentés, `vless=3 vmess=3 trojan=3 shadowsocks=9`
+- **Commit Phase 5 (lot 3 moteur) :** `2f1d84e`
+- **Runs CI Phase 5 (lot 3) :** [Android CI #44225296961](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44225296961) — `success`, tests unitaires + `assembleDebug` + compilation des tests instrumentés ; [E2E #44225296989](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44225296989) — `success`, 34/34 instrumentés, `vless=3 vmess=3 trojan=3 shadowsocks=9`, artefact installable `onfaa-tunnel-apk` (71 079 614 octets). Itérations précédentes : `0a52025` (échec compile, corrigé par `1a4b699`), `1a4b699` (échec test unitaire trop large, corrigé par `2f1d84e`).
 - **Commit Phase 4 (code) :** `230008c`
 - **Runs CI Phase 4 :** [Android CI #44011899010](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44011899010) — `success` ; [libXray Android build and real VPN E2E #44011899095](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44011899095) — `success`, 27/27 instrumentés
 - **Commit Phase 3 (code) :** `5f518313082fc095eeb118553b6fd969318cddfd`
@@ -23,7 +25,7 @@
 - **Dernier commit Phase 2B validé :** `f116442021b4e80508e3ef2448d21980f2207534`
 - **Run Phase 2B réussi :** [#43965698249](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/43965698249)
 
-## Implémentation Phase 5 — lot 3 (branchement des réglages au cœur, en validation CI)
+## Implémentation Phase 5 — lot 3 (branchement des réglages au cœur, livré et validé)
 
 ### Mapping préférences → moteur (`EngineSettings`)
 
@@ -46,6 +48,12 @@
 
 - Unitaires (pur JVM, sans moteur) : `EngineSettingsTest` (7 : défauts identiques au comportement validé, DoH/bootstrap, UDP, plancher de log, replis sûrs, transport des options, rejets) et `XrayConfigBuilderTest` étendu (mux émis/absent, fragment + `dialerProxy`, blackhole + règle, `proxy_only` sans la règle directe mais DNS conservé, inbound SOCKS hotspot, rejets MTU/routage).
 - Par construction, les réglages par défaut produisent une configuration identique aux runs E2E verts du lot 1 (MTU 1500, DNS via override E2E, options désactivées).
+
+### Validation CI du lot 3 (preuves)
+
+- **Commit :** `2f1d84e`. [Android CI #44225296961](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44225296961) — `success` (tests unitaires, `assembleDebug`, compilation des tests instrumentés).
+- [E2E #44225296989](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44225296989) — `success` : **34/34 tests instrumentés** sur émulateur x86_64 API 35 avec le moteur réel, `ACCESS_LOG_PER_PROTOCOL_OK vless=3 vmess=3 trojan=3 shadowsocks=9`, étape « Verify E2E evidence » passée, artefact **`onfaa-tunnel-apk`** publié (71 079 614 octets) avec l'AAR libXray v26.11.9 vérifié (SHA-256 `1655655c5dce1d45d2c065cf8db5373661badb4f0721a21db32e82d3d943d917`).
+- Tracé des itérations : `0a52025` (échec compilation : `.first()` appelé sur le dépôt au lieu du Flow `preferences`) → corrigé par `1a4b699` ; `1a4b699` (échec : le test `proxy_only` affirmait l'absence de toute règle directe alors que la règle `dns-direct` légitime porte `direct`) → corrigé par `2f1d84e` (ciblage explicite de la règle IP des réseaux privés).
 
 ## Implémentation Phase 5 — lot 1 (livrée)
 
