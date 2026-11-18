@@ -46,7 +46,7 @@ class AppFilterTest {
     @Test
     fun `package grammar accepts platform characters`() {
         assertTrue(AppFilter.isValidPackageName("com.example.app"))
-        assertTrue(AppFilter.isValidPackageName("com.example.app_2$Sub"))
+        assertTrue(AppFilter.isValidPackageName("com.example.app_2\$Sub"))
         assertFalse(AppFilter.isValidPackageName(""))
         assertFalse(AppFilter.isValidPackageName("com example"))
         assertFalse(AppFilter.isValidPackageName("com/ex ample"))
