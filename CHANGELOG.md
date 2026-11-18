@@ -11,7 +11,15 @@ Le format s’inspire de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/
 - **Auto-connexion (réelle)** : au lancement de l'application (une tentative par session, `Idle`, profil complet, consentement Android respecté) et au démarrage du téléphone (`BootReceiver` + `RECEIVE_BOOT_COMPLETED`, uniquement si le consentement VPN a déjà été accordé ; refus journalisés). La préférence `autoConnect`, précédemment persistée sans effet, est désormais appliquée.
 - **Abonnements** : `SubscriptionParser` (base64 v2ray ou liste brute), `SubscriptionImporter` (HTTP http/https, timeouts 15/20 s, plafond 2 Mo, chaque lien validé par le moteur via `ConfigImporter`), `SubscriptionStore` (sources enregistrées, rafraîchissement, suppression) ; dialog « Abonnement (URL) » dans l'écran Configs.
 - **Tests** : `AppFilterTest` (8), `SubscriptionParserTest` (6) en JVM ; instrumentés : deux scénarios E2E réels de filtrage (app autorisée seule → tunnel réel traversé ; app exclue → tunnel connecté mais trafic de l'app contourné, preuve observable), `SubscriptionImportInstrumentedTest` (4, serveur HTTP local réel).
-- **Version** : `versionCode 7`, `versionName 0.7.0-lot4-features`.
+- **Version** : `versionCode 8`, `versionName 0.7.1-lot4-probe-fix`.
+
+### Correctif 0.7.1 — connexion qui restait bloquée sans message
+- **Cause observée** (journal appareil : dernier événement « Moteur Xray démarré », puis plus rien) : la phase de vérification pouvait rester bloquée sur une résolution DNS sans borne dure — les délais `connectTimeout`/`readTimeout` de `HttpURLConnection` ne couvrent pas la résolution de nom — et n'écrivait aucun événement pendant l'attente.
+- **Bornes dures** : `ConnectivityProbe` exécute chaque vérification sur un thread daemon jetable avec `Future.get(boundMs)` ; une résolution figée produit désormais un échec « délai dur dépassé (résolution DNS figée ?) » au lieu d'un silence, et l'attente du réseau VPN est bornée par la même échéance globale.
+- **Plusieurs cibles** : quand aucun `EXTRA_PROBE_URL` n'est fourni, trois cibles HTTP neutres (port 80, sans TLS) sont essayées dans l'ordre ; le E2E CI garde son URL explicite unique, donc reste déterministe. Même logique pour la surveillance périodique et la reconnexion.
+- **Journal complet de la vérification** : « Attente du réseau VPN Android… », « Réseau VPN actif », « Vérification n/6 : <cible> », « Sans réponse sur <cible> : <détail> », « Protection des sockets moteur active » (ou avertissement si `VpnService.protect` refuse un socket), « Moteur prêt — cible hôte:port ».
+- **Session interrompue** : au démarrage, si le journal persistant s'arrête sur une étape non terminale et que le moteur n'est pas actif, un avertissement l'explique explicitement (« La session précédente s'est interrompue pendant la connexion… »).
+- **Tests** : classification DNS/timeout de `ConnectivityProbe` conservée en JVM ; pas de nouveau test réseau (non déterministe hors CI).
 - **Docs** : `README.md`, `STATUS.md` ; validation CI en attente (tracé dans `STATUS.md`).
 
 ### Phase 5 — lot 3 : les réglages « moteur » sont branchés au cœur Xray (livré et validé en CI)

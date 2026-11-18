@@ -13,8 +13,8 @@ android {
         applicationId = "com.onfaa.tunnel"
         minSdk = 26
         targetSdk = 35
-        versionCode = 7
-        versionName = "0.7.0-lot4-features"
+        versionCode = 8
+        versionName = "0.7.1-lot4-probe-fix"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

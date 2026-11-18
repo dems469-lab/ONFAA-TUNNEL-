@@ -61,7 +61,6 @@ class OnfaaTunnelVpnService : VpnService() {
         const val EXTRA_PROBE_URL = "com.onfaa.tunnel.extra.PROBE_URL"
 
         const val DEFAULT_DNS_SERVER = XrayConfigBuilder.DEFAULT_RESOLVER_ENDPOINT
-        const val DEFAULT_PROBE_URL = "https://www.gstatic.com/generate_204"
 
         private const val CHANNEL_ID = "onfaa_tunnel"
         private const val NOTIFICATION_ID = 1001
@@ -73,6 +72,7 @@ class OnfaaTunnelVpnService : VpnService() {
         private const val VPN_READY_TIMEOUT_MS = 15_000L
         private const val PROBE_ATTEMPTS = 6
         private const val PROBE_RETRY_DELAY_MS = 3_000L
+        private const val PROBE_REQUEST_TIMEOUT_MS = 6_000
         private const val PROBE_TOTAL_TIMEOUT_MS = 40_000L
 
         // After Connected, the tunnel is re-proven with a real request. A
@@ -226,9 +226,16 @@ class OnfaaTunnelVpnService : VpnService() {
                 if (protected) {
                     if (protectSuccesses.incrementAndGet() == 1) {
                         Log.i(TAG, "VpnService.protect granted for an engine socket")
+                        TunnelStatusRepository.log("Protection des sockets moteur active")
                     }
                 } else if (protectFailures.incrementAndGet() <= 5) {
                     Log.w(TAG, "VpnService.protect returned false for an engine socket")
+                    if (protectFailures.get() == 1) {
+                        TunnelStatusRepository.log(
+                            "VpnService.protect a refusé un socket du moteur — le tunnel risque de boucler",
+                            LogSeverity.WARNING
+                        )
+                    }
                 }
                 protected
             }
@@ -263,12 +270,22 @@ class OnfaaTunnelVpnService : VpnService() {
             }
             engineRunning = true
             TunnelStatusRepository.log("Moteur Xray démarré (libXray ${XrayBridge.API_VERSION})")
+            TunnelStatusRepository.log("Moteur prêt — cible ${profile.endpoint}", LogSeverity.INFO)
 
             TunnelStatusRepository.set(TunnelState.Verifying)
             updateNotification("Vérification de la connectivité…")
-            val probeUrl = intent.getStringExtra(EXTRA_PROBE_URL) ?: DEFAULT_PROBE_URL
+            // An explicit probe URL (deep links, deterministic CI E2E) is used
+            // alone; otherwise neutral plain-HTTP targets are tried in order so
+            // one blocked endpoint cannot reject a working tunnel.
+            val explicitProbeUrl = intent.getStringExtra(EXTRA_PROBE_URL)
+            val probeTargets = explicitProbeUrl?.let { listOf(it) }
+                ?: ConnectivityProbe.NEUTRAL_TARGETS
+            TunnelStatusRepository.log(
+                "Vérification de la connectivité démarrée (${probeTargets.size} cible(s))",
+                LogSeverity.INFO
+            )
             val probe = awaitConnectivity(
-                probeUrl,
+                probeTargets,
                 totalTimeoutMs = prefs.connectionTimeoutSec.coerceIn(5, 120) * 1000L
             )
             if (!probe.ok && !ConnectivityProbe.isDnsFailure(probe)) {
@@ -315,7 +332,7 @@ class OnfaaTunnelVpnService : VpnService() {
             startTrafficSampling()
             startHealthMonitor(
                 profile,
-                probeUrl,
+                probeTargets,
                 autoReconnect = prefs.autoReconnect,
                 reconnectDelayMs = prefs.reconnectDelaySec.coerceIn(1, 60) * 1000L
             )
@@ -350,45 +367,74 @@ class OnfaaTunnelVpnService : VpnService() {
 
     /**
      * Waits until Android reports the VPN as the app network, then probes the
-     * URL, retrying a few times. The first probe can run before netd applied
-     * the VPN link and its DNS servers, which would resolve through the
-     * previous network and fail with NXDOMAIN.
+     * targets, retrying a few times. The first probe can run before netd
+     * applied the VPN link and its DNS servers, which would resolve through
+     * the previous network and fail with NXDOMAIN. Every step is logged so a
+     * stalled connection never looks silent again.
      */
     private suspend fun awaitConnectivity(
-        url: String,
+        targets: List<String>,
         totalTimeoutMs: Long = PROBE_TOTAL_TIMEOUT_MS
     ): ConnectivityProbe.Result {
         var attempt = 1
-        var result = ConnectivityProbe.Result(false, "not attempted")
+        var result = ConnectivityProbe.Result(
+            false,
+            "aucune tentative effectuée",
+            ConnectivityProbe.FailureKind.TRANSPORT
+        )
         val deadline = SystemClock.elapsedRealtime() + totalTimeoutMs
+        TunnelStatusRepository.log("Attente du réseau VPN Android…", LogSeverity.INFO)
         while (attempt <= PROBE_ATTEMPTS && !destroyed && SystemClock.elapsedRealtime() < deadline) {
-            waitForVpnNetwork()
-            result = ConnectivityProbe.check(url, timeoutMs = 6_000)
-            Log.i(TAG, "Connectivity probe attempt $attempt/${PROBE_ATTEMPTS}: ok=${result.ok} detail=${result.detail}")
-            if (result.ok) return result
+            val vpnReady = waitForVpnNetwork(deadline)
+            if (vpnReady) {
+                TunnelStatusRepository.log("Réseau VPN actif — vérification du trafic réel")
+            } else {
+                TunnelStatusRepository.log(
+                    "Réseau VPN non actif après ${VPN_READY_TIMEOUT_MS / 1_000} s — vérification tentée quand même",
+                    LogSeverity.WARNING
+                )
+            }
+            for (target in targets) {
+                if (destroyed || SystemClock.elapsedRealtime() >= deadline) break
+                TunnelStatusRepository.log("Vérification ${attempt}/${PROBE_ATTEMPTS} : $target")
+                result = ConnectivityProbe.check(target, timeoutMs = PROBE_REQUEST_TIMEOUT_MS)
+                Log.i(
+                    TAG,
+                    "Connectivity probe $attempt/${PROBE_ATTEMPTS} target=$target ok=${result.ok} " +
+                        "detail=${result.detail}"
+                )
+                if (result.ok) return result
+                TunnelStatusRepository.log(
+                    "Sans réponse sur $target : ${result.detail}",
+                    LogSeverity.WARNING
+                )
+            }
             attempt++
             if (attempt <= PROBE_ATTEMPTS && SystemClock.elapsedRealtime() < deadline) {
-                TunnelStatusRepository.log("Vérification reportée (${attempt}/${PROBE_ATTEMPTS}) : ${result.detail}")
                 delay(PROBE_RETRY_DELAY_MS)
             }
         }
         return result
     }
 
-    /** Blocks until the app's active network is the VPN, or the timeout ends. */
-    private suspend fun waitForVpnNetwork() {
-        val manager = getSystemService(ConnectivityManager::class.java) ?: return
-        val deadline = SystemClock.elapsedRealtime() + VPN_READY_TIMEOUT_MS
-        while (!destroyed && SystemClock.elapsedRealtime() < deadline) {
+    /**
+     * Blocks until the app's active network is the VPN (bounded by the overall
+     * verification deadline), returning whether it became active.
+     */
+    private suspend fun waitForVpnNetwork(deadline: Long): Boolean {
+        val manager = getSystemService(ConnectivityManager::class.java) ?: return false
+        val waitUntil = minOf(deadline, SystemClock.elapsedRealtime() + VPN_READY_TIMEOUT_MS)
+        while (!destroyed && SystemClock.elapsedRealtime() < waitUntil) {
             val network = manager.activeNetwork
             val capabilities = network?.let { manager.getNetworkCapabilities(it) }
             if (capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true) {
                 Log.i(TAG, "VPN network is the active network")
-                return
+                return true
             }
             delay(200)
         }
         Log.w(TAG, "VPN network not active after ${VPN_READY_TIMEOUT_MS}ms")
+        return false
     }
 
     private suspend fun resolveProfile(intent: Intent): TunnelProfile {
@@ -422,8 +468,8 @@ class OnfaaTunnelVpnService : VpnService() {
      * down but the engine forwards traffic, the tunnel is kept up and the
      * detail states exactly what was proven (TCP via tunnel, DNS pending).
      */
-    private suspend fun verifyTunnel(probeUrl: String): ConnectivityProbe.Result {
-        val probe = ConnectivityProbe.check(probeUrl, timeoutMs = 8_000)
+    private suspend fun verifyTunnel(probeUrls: List<String>): ConnectivityProbe.Result {
+        val probe = ConnectivityProbe.checkAny(probeUrls, timeoutMsPerTarget = 6_000)
         if (probe.ok) {
             if (dnsPendingNotice) {
                 dnsPendingNotice = false
@@ -449,7 +495,7 @@ class OnfaaTunnelVpnService : VpnService() {
 
     private fun startHealthMonitor(
         profile: TunnelProfile,
-        probeUrl: String,
+        probeUrls: List<String>,
         autoReconnect: Boolean,
         reconnectDelayMs: Long
     ) {
@@ -459,7 +505,7 @@ class OnfaaTunnelVpnService : VpnService() {
                 delay(HEALTH_CHECK_INTERVAL_MS)
                 if (destroyed) break
                 if (TunnelStatusRepository.state.value !is TunnelState.Connected) continue
-                val probe = verifyTunnel(probeUrl)
+                val probe = verifyTunnel(probeUrls)
                 if (probe.ok) {
                     Log.i(TAG, "Health probe ok: ${probe.detail}")
                     continue
@@ -478,7 +524,7 @@ class OnfaaTunnelVpnService : VpnService() {
                     stopSelf()
                     break
                 }
-                awaitRecovery(profile, probeUrl, reconnectDelayMs)
+                awaitRecovery(profile, probeUrls, reconnectDelayMs)
                 if (TunnelStatusRepository.state.value is TunnelState.Error) break
             }
         }
@@ -486,7 +532,7 @@ class OnfaaTunnelVpnService : VpnService() {
 
     private suspend fun awaitRecovery(
         profile: TunnelProfile,
-        probeUrl: String,
+        probeUrls: List<String>,
         reconnectDelayMs: Long
     ) {
         val deadline = SystemClock.elapsedRealtime() + RECONNECT_TIMEOUT_MS
@@ -496,7 +542,7 @@ class OnfaaTunnelVpnService : VpnService() {
         while (!destroyed && SystemClock.elapsedRealtime() < deadline) {
             delay(reconnectDelayMs)
             if (destroyed) return
-            val probe = verifyTunnel(probeUrl)
+            val probe = verifyTunnel(probeUrls)
             if (probe.ok) {
                 val since = connectedSinceEpochMs.takeIf { it > 0L } ?: System.currentTimeMillis()
                 TunnelStatusRepository.set(
