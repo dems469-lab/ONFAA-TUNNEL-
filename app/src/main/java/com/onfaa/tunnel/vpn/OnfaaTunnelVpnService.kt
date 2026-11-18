@@ -155,7 +155,7 @@ class OnfaaTunnelVpnService : VpnService() {
             // Engine options come from the persisted user preferences; the
             // intent DNS extra stays a deterministic override for tests and
             // deep links. Every value below is really applied to the config.
-            val prefs = applicationContext.onfaaAppContainer.userPreferencesRepository.first()
+            val prefs = applicationContext.onfaaAppContainer.userPreferencesRepository.preferences.first()
             val settings = EngineSettings.from(
                 preferences = prefs,
                 logLevelFloor = if (isDebuggable) "info" else XrayConfigBuilder.DEFAULT_LOG_LEVEL
