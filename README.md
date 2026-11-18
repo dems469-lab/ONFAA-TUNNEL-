@@ -2,11 +2,11 @@
 
 ONFAA TUNNEL est un client VPN Android natif visant à fournir une connexion VPN réelle basée sur le cœur officiel **XTLS/Xray-core** (upstream : https://github.com/XTLS/Xray-core) via **libXray** (après vérification de compatibilité/API officielle).
 
-> **État actuel : Phase 5 — lot 1 livré (Trojan, Shadowsocks, SOCKS5) sur le tunnel réel.**  
-> Le tunnel VPN réel fonctionne de bout en bout en CI pour **VLESS, VMess, Trojan et Shadowsocks** avec le même moteur officiel XTLS/Xray-core v26.11.9 ; l’import accepte aussi les liens/JSON **SOCKS5** (conversion et validation moteur réelles, sans tunnel E2E revendiqué). Les profils restent persistés en Room v2 (outbound chiffré AES-256-GCM via Android Keystore), avec sélection DataStore, import lien/presse-papiers/fichier/JSON, cycle de vie à 9 états, journaux assainis et statistiques mesurées. Code : commit `5e2f0d4` ; CI :
+> **État actuel : Phase 5 — lot 3 (les réglages « moteur » sont branchés au cœur Xray).**  
+> Le tunnel VPN réel fonctionne de bout en bout en CI pour **VLESS, VMess, Trojan et Shadowsocks** avec le même moteur officiel XTLS/Xray-core v26.11.9. Les options de Paramètres sont désormais **réellement appliquées au moteur** à la prochaine connexion : DNS/DoH choisi, MTU (TUN + inbound), mux (`streamSettings`), fragmentation TLS (outbound `freedom` + `fragment` tlshello via `dialerProxy`), ad blocker (règle de routage vers un outbound `blackhole`), mode de routage (`all` / `bypass_private` / `proxy_only`), hotspot (inbound SOCKS local `0.0.0.0:10808`), niveau de log, timeout de connexion, délai et reconnexion automatique. Le mode gaming et le comportement en arrière-plan n'ont pas d'équivalent moteur et restent honnêtement signalés sans effet. Les profils restent persistés en Room v2 (outbound chiffré AES-256-GCM via Android Keystore), avec sélection DataStore, import lien/presse-papiers/fichier/JSON, cycle de vie à 9 états, journaux assainis et statistiques mesurées. Code : lot 3 en cours de validation CI ; derniers runs verts :  
 > [Android CI #44019183046](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44019183046) (**succès**, 27 tests unitaires),
 > [E2E #44019183061](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44019183061) (**succès**, 34/34 instrumentés, `vless=3 vmess=3 trojan=3 shadowsocks=9`).
-> Rapports : [`docs/PHASE_5_PROTOCOLS_REPORT.md`](docs/PHASE_5_PROTOCOLS_REPORT.md) et [`docs/PHASE_4_REPORT.md`](docs/PHASE_4_REPORT.md). Limites **non revendiquées** : appareil physique ARM64, changement d’IP publique, tunnel SOCKS5 de bout en bout.
+> Rapports : [`docs/PHASE_5_PROTOCOLS_REPORT.md`](docs/PHASE_5_PROTOCOLS_REPORT.md) et [`docs/PHASE_4_REPORT.md`](docs/PHASE_4_REPORT.md). Limites **non revendiquées** : appareil physique ARM64, changement d'IP publique, tunnel SOCKS5 de bout en bout.
 
 ## Objectifs
 
@@ -54,6 +54,12 @@ Versions épinglées et choix documentés dans [`docs/DECISIONS.md`](docs/DECISI
 ├── build.gradle.kts, settings.gradle.kts, gradle.properties
 └── gradlew, gradlew.bat
 ```
+
+## Fonctionnement du VPN (comment l'utiliser maintenant)
+
+1. Onglet **Actions** de ce dépôt → workflow **libXray Android build and real VPN E2E** → run vert → artefact **`onfaa-tunnel-apk`** (c'est le seul APK **avec** le moteur ; celui d'Android CI, `onfaa-tunnel-debug-apk-no-engine`, n'ouvre pas de tunnel).
+2. Installer l'APK sur le téléphone (Android ≥ 8.1), importer un lien `vless://`, `vmess://`, `trojan://`, `ss://` ou `socks://`, appuyer sur **Connexion** et accorder la permission VPN.
+3. Les réglages de Paramètres (DNS/DoH, MTU, mux, fragmentation TLS, ad blocker, routage, hotspot, logs, reconnexion) sont appliqués au cœur Xray **à la prochaine connexion** ; un message du journal (« Options moteur appliquées… ») le confirme à chaque démarrage du tunnel.
 
 ## Compilation (GitHub Actions uniquement)
 

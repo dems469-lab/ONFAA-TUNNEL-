@@ -3,10 +3,12 @@ package com.onfaa.tunnel.domain.model
 /**
  * User preferences persisted with DataStore.
  *
- * [themeKey] and [themeMode] drive the real application theme. The remaining
- * fields back the settings screens; each one is persisted, but engine-bound
- * options are not yet applied to the Xray configuration (documented in
- * docs/design/DESIGN_SPEC.md and surfaced in the UI).
+ * [themeKey] and [themeMode] drive the real application theme. Engine-bound
+ * fields (DNS, routing, MTU, mux, TLS fragmentation, ad blocker, hotspot,
+ * log level, reconnection) are mapped to real Xray-core options by
+ * [com.onfaa.tunnel.core.xray.EngineSettings] and applied by the VPN service
+ * at the next connection. [gamingMode] and [backgroundBehavior] have no real
+ * engine equivalent and stay persisted-only (documented in the UI).
  */
 data class UserPreferences(
     val themeKey: String = "onfaa",

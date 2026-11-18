@@ -62,6 +62,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.onfaa.tunnel.BuildConfig
 import com.onfaa.tunnel.core.xray.XrayBridge
+import com.onfaa.tunnel.core.xray.XrayConfigBuilder
 import com.onfaa.tunnel.data.config.TunnelConfigRepository
 import com.onfaa.tunnel.data.preferences.UserPreferencesRepository
 import com.onfaa.tunnel.domain.model.UserPreferences
@@ -283,12 +284,13 @@ fun ConnectionSettingsScreen(onBack: () -> Unit) {
         }
         Spacer(modifier = Modifier.height(16.dp))
         SettingsNotice(
-            text = "Ces préférences sont enregistrées. Le service VPN actuel reste actif en " +
-                "arrière-plan ; la reconnexion automatique et les timeouts seront appliqués au " +
-                "cycle de vie dans une phase ultérieure."
+            text = "Ces préférences sont appliquées au service à la prochaine connexion : " +
+                "la reconnexion automatique, le timeout de connexion et le délai de " +
+                "reconnexion pilotent le cycle de vie réel du tunnel."
         )
         Text(
-            text = "Valeurs appliquées au service : non raccordées dans cette version.",
+            text = "Le comportement en arrière-plan reste une préférence mémorisée : " +
+                "Android maintient le service actif tant que le VPN est connecté.",
             style = MaterialTheme.typography.labelSmall,
             color = palette.textMuted,
             modifier = Modifier.padding(top = 8.dp)
@@ -385,10 +387,11 @@ fun AntiCensorshipSettingsScreen(onBack: () -> Unit) {
         }
         Spacer(modifier = Modifier.height(16.dp))
         InfoCard(
-            title = "Option d'interface",
-            message = "La fragmentation TLS et les profils SNI ne modifient pas encore la " +
-                "configuration Xray. Le moteur reste inchangé dans cette phase ; aucune " +
-                "protection supplémentaire n'est annoncée à tort."
+            title = "Application réelle",
+            message = "La fragmentation TLS est appliquée au moteur via le mécanisme officiel " +
+                "Xray-core (outbound freedom + fragment tlshello avec dialerProxy) à la " +
+                "prochaine connexion. Le SNI reste géré par le mode d'injection choisi à " +
+                "l'import du profil."
         )
     }
 }
@@ -448,9 +451,11 @@ fun AdvancedModesScreen(
         }
         Spacer(modifier = Modifier.height(16.dp))
         SettingsNotice(
-            text = "Le blocage publicitaire et le mode gaming sont des préférences d'interface. " +
-                "Ils ne sont pas encore traduits en règles Xray ; aucun trafic n'est filtré par " +
-                "ces options actuellement."
+            text = "L'ad blocker est appliqué au moteur à la prochaine connexion : une règle " +
+                "de routage Xray envoie une liste embarquée de domaines publicitaires et " +
+                "traqueurs vers un outbound blackhole. Le mode gaming reste une préférence " +
+                "mémorisée : Xray-core n'offre aucun équivalent de priorisation, aucun effet " +
+                "n'est simulé."
         )
     }
 }
@@ -502,17 +507,21 @@ fun DnsSettingsScreen(onBack: () -> Unit) {
             )
             Spacer(modifier = Modifier.height(6.dp))
             Text(
-                text = "Le tunnel utilise actuellement le résolveur par défaut du service " +
-                    "Xray (1.1.1.1:53). Le choix ci-dessus est mémorisé mais pas encore " +
-                    "transmis au moteur.",
+                text = if (prefs.dnsOverHttps) {
+                    "Ce résolveur est transmis au moteur Xray en DoH " +
+                        "(https://${prefs.dnsServer}/dns-query) à la prochaine connexion."
+                } else {
+                    "Ce résolveur est transmis au moteur Xray en UDP " +
+                        "(${prefs.dnsServer}:53) à la prochaine connexion."
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = palette.textSecondary
             )
         }
         Spacer(modifier = Modifier.height(16.dp))
         SettingsNotice(
-            text = "Le DNS réellement utilisé par le tunnel reste celui du service. " +
-                "Aucun résultat DNS simulé n'est affiché."
+            text = "Le DNS réellement utilisé par le tunnel est celui choisi ici, appliqué au " +
+                "moteur à la prochaine connexion. Aucun résultat DNS simulé n'est affiché."
         )
     }
     if (showServers) {
@@ -570,8 +579,10 @@ fun RoutingSettingsScreen(onBack: () -> Unit) {
             )
             Spacer(modifier = Modifier.height(6.dp))
             Text(
-                text = "Le moteur route déjà le DNS vers dns-out, les réseaux privés en direct " +
-                    "et le reste via le proxy. Le mode choisi ici n'est pas encore appliqué.",
+                text = "Le mode choisi est appliqué au moteur Xray à la prochaine connexion : " +
+                    "« Toutes les applications » et « Réseaux privés directs » routent le DNS " +
+                    "vers dns-out et les réseaux privés en direct ; « Proxy uniquement » supprime " +
+                    "la règle directe des réseaux privés (tout passe par le tunnel).",
                 style = MaterialTheme.typography.bodySmall,
                 color = palette.textSecondary
             )
@@ -639,9 +650,10 @@ fun NetworkEngineScreen(onBack: () -> Unit) {
         }
         Spacer(modifier = Modifier.height(16.dp))
         SettingsNotice(
-            text = "Le TUN Android et la configuration Xray utilisent actuellement MTU 1500 " +
-                "et le mux par défaut. Les valeurs choisies ici sont mémorisées, mais le " +
-                "service conserve ses réglages validés pour ne pas perturber les tests E2E."
+            text = "Le MTU choisi est appliqué au TUN Android et à l'inbound tun de la " +
+                "configuration Xray, et le mux est émis dans les streamSettings de l'outbound " +
+                "proxy, à la prochaine connexion. Par défaut le service garde MTU 1500 et le " +
+                "mux désactivé, valeurs validées par les tests E2E."
         )
     }
     if (showMtu) {
@@ -685,10 +697,11 @@ fun HotspotSettingsScreen(onBack: () -> Unit) {
         }
         Spacer(modifier = Modifier.height(16.dp))
         InfoCard(
-            title = "Non raccordé",
-            message = "Le partage hotspot nécessite un proxy local et une configuration " +
-                "système supplémentaires. L'interrupteur mémorise la préférence mais aucun " +
-                "proxy n'est exposé actuellement.",
+            title = "Proxy local réel",
+            message = "À la prochaine connexion, le moteur expose un inbound SOCKS réel sur " +
+                "0.0.0.0:${XrayConfigBuilder.HOTSPOT_SOCKS_PORT} (authentification désactivée, UDP activé). Les appareils " +
+                "connectés au hotspot doivent configurer ce proxy manuellement dans leurs " +
+                "réglages Wi-Fi ; Android ne force pas leur trafic dans le tunnel.",
             icon = Icons.Filled.WifiTethering
         )
     }
@@ -812,8 +825,9 @@ fun DiagnosticsSettingsScreen(
         )
         Spacer(modifier = Modifier.height(5.dp))
         Text(
-            text = "Le niveau de log est mémorisé ; le service utilise le niveau compilé " +
-                "(info en debug, warning en release).",
+            text = "Le niveau de log choisi est appliqué au moteur Xray à la prochaine " +
+                "connexion (les compilations debug restent au minimum « info » pour les " +
+                "preuves E2E).",
             style = MaterialTheme.typography.labelSmall,
             color = palette.textMuted,
             modifier = Modifier.padding(horizontal = 4.dp)

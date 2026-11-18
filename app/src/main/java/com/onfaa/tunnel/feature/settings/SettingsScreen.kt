@@ -405,9 +405,10 @@ fun SettingsScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
             SettingsNotice(
-                text = "Les réglages d'interface sont actifs et mémorisés. Les options moteur " +
-                    "(fragmentation, blocage, gaming, hotspot, routage) seront raccordées au tunnel " +
-                    "dans une phase ultérieure : aucun effet n'est simulé."
+                text = "Les options moteur (fragmentation, ad blocker, DNS, routage, MTU, mux, " +
+                    "hotspot, niveau de log, reconnexion) sont appliquées au cœur Xray à la " +
+                    "prochaine connexion. Le mode gaming et le comportement en arrière-plan " +
+                    "restent mémorisés sans équivalent moteur : aucun effet n'est simulé."
             )
             Spacer(modifier = Modifier.height(20.dp))
         }

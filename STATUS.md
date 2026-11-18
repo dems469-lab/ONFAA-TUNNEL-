@@ -2,9 +2,10 @@
 
 ## État de phase
 
-- **Phase actuelle :** 5 — lot 1 du plan de parité (protocoles) — **livré, compilé et testé en CI (émulateur x86_64)**
-- **État :** l’application importe et exécute désormais **VLESS, VMess, Trojan, Shadowsocks et SOCKS5** avec le même moteur XTLS/Xray-core v26.11.9 (libXray v26.11.9), sans sing-box ni simulation. Import par lien (`vless://`, `vmess://`, `trojan://`, `ss://`, `socks://`) ou JSON Xray, validation structurelle puis `testXray`, profils chiffrés AES-256-GCM comme en Phase 4 (aucune migration Room nécessaire). Le run Android CI [#44019183046](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44019183046) (commit `5e2f0d4`) est **vert** : 27 tests unitaires, APK debug + APK de tests. Le run E2E [#44019183061](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44019183061) est **vert** : 30 étapes, **34/34 tests instrumentés** (0 échec, 0 ignoré), `VpnTunnelE2ETest` 6/6 avec tunnels réels VLESS, VMess, **Trojan** et **Shadowsocks**, `ACCESS_LOG_PER_PROTOCOL_OK vless=3 vmess=3 trojan=3 shadowsocks=9`. Détail : `docs/PHASE_5_PROTOCOLS_REPORT.md`.
-- **Non revendiqué (lot 1) :** tunnel SOCKS5 de bout en bout (conversion + validation moteur seulement), chaîne TLS publique pour Trojan (preuve par certificat auto-signé épinglé), Shadowsocks 2022 (preuve AEAD `aes-256-gcm` uniquement), Hysteria 2 (inexécutable par Xray-core).
+- **Phase actuelle :** 5 — lot 3 (branchement des réglages au cœur Xray) — **code livré, validation CI en cours**
+- **État :** les options « moteur » des Paramètres, précédemment persistées sans effet, sont désormais **réellement appliquées au moteur** par `OnfaaTunnelVpnService` au démarrage du tunnel, via le nouveau mapping `EngineSettings` : DNS/DoH choisi (config `dns` réelle + résolveur bootstrap), MTU (TUN Android + inbound tun), mux (`streamSettings.mux` sur l'outbound proxy), fragmentation TLS (outbound `freedom` + `fragment` tlshello relié par `dialerProxy`), ad blocker (règle de routage → outbound `blackhole`, liste de domaines embarquée), mode de routage (`all`/`bypass_private`/`proxy_only`), hotspot (inbound SOCKS réel `0.0.0.0:10808`), niveau de log (jamais inférieur au plancher du type de build), timeout de connexion (borne la fenêtre de vérification), délai et reconnexion automatique (cycle de vie). Le mode gaming et le comportement en arrière-plan n'ont pas d'équivalent Xray-core et restent signalés sans effet dans l'UI. L'override DNS par `EXTRA_DNS_SERVER` (tests E2E) reste prioritaire, donc les preuves E2E du lot 1 restent déterministes. Version : `versionCode 6`, `versionName 0.6.0-engine-options`.
+- **Non revendiqué (lot 3) :** validation CI verte et exécution E2E de ce lot (en attente des runs) ; appareil physique ARM64 ; changement d'IP publique ; tunnel SOCKS5 de bout en bout ; effet réel du mode gaming ; filtrage par application.
+- **Lot 1 (protocoles) :** livré et validé — l'application importe et exécute **VLESS, VMess, Trojan, Shadowsocks et SOCKS5** avec le même moteur XTLS/Xray-core v26.11.9 (libXray v26.11.9), sans sing-box ni simulation. Le run Android CI [#44019183046](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44019183046) (commit `5e2f0d4`) est **vert** : 27 tests unitaires ; le run E2E [#44019183061](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44019183061) est **vert** : **34/34 tests instrumentés**, `VpnTunnelE2ETest` 6/6 avec tunnels réels, `ACCESS_LOG_PER_PROTOCOL_OK vless=3 vmess=3 trojan=3 shadowsocks=9`. Détail : `docs/PHASE_5_PROTOCOLS_REPORT.md`.
 - **Phase 3 :** terminée et validée en CI (tunnel réel VLESS/VMess, 21/21 instrumentés, run [#44004893595](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44004893595)) ; preuves conservées ci-dessous.
 - **Phase 2B :** terminée et validée (AAR officiel, API native, 6/6 tests instrumentés) ; preuves conservées ci-dessous.
 
@@ -21,6 +22,30 @@
 - **Run de confirmation (CI allégée, commit `aef515e`) :** [#44006718908](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/44006718908) — `success`, 21/21 instrumentés, `vless=3 vmess=3`
 - **Dernier commit Phase 2B validé :** `f116442021b4e80508e3ef2448d21980f2207534`
 - **Run Phase 2B réussi :** [#43965698249](https://github.com/dems469-lab/ONFAA-TUNNEL-/actions/runs/43965698249)
+
+## Implémentation Phase 5 — lot 3 (branchement des réglages au cœur, en validation CI)
+
+### Mapping préférences → moteur (`EngineSettings`)
+
+- `core/xray/EngineSettings` : mapping pur et validé (`init` avec rejets explicites) de `UserPreferences` vers les options réellement exécutables par Xray-core ; valeurs inconnues retombées sur des valeurs sûres ; plancher de niveau de log (compilations debug ≥ `info`) jamais abaissé par la préférence.
+- Résolveur bootstrap : `bootstrapResolverEndpoint()` donne toujours un `host:53` UDP pour `setDNS`, même quand le DNS choisi est en DoH (URL valable seulement dans la config `dns`).
+
+### Application par le service VPN
+
+- Le service lit `UserPreferencesRepository` (`first()`) à chaque connexion et journalise une ligne « Options moteur appliquées… » (sans secret).
+- DNS : serveur choisi (DoH `https://host/dns-query` ou UDP) dans la config `dns` + résolveur bootstrap ; l'override `EXTRA_DNS_SERVER` (E2E) reste prioritaire.
+- MTU : `buildTun(mtu)` et inbound tun ; mux : `streamSettings.mux {enabled, concurrency=8}` seulement si le profil n'en porte pas déjà ; fragmentation : `dialerProxy` → outbound `tls-fragment` (`freedom` + `fragment` tlshello) ; ad blocker : première règle de routage → outbound `blackhole` (`AD_DOMAINS`, 22 domaines embarqués) ; routage : `proxy_only` supprime la règle directe des réseaux privés ; hotspot : inbound `socks` réel sur `0.0.0.0:10808` (`noauth`, UDP).
+- Cycle de vie : timeout de connexion = fenêtre totale de vérification (`connectionTimeoutSec`, 5–120 s) ; `autoReconnect=false` → erreur et arrêt propre immédiats au lieu de la fenêtre de reprise ; `reconnectDelaySec` (1–60 s) pilote les tentatives de reprise.
+
+### Honnêteté et UI
+
+- Notices de Paramètres mises à jour : fragmentation, ad blocker, DNS, routage, MTU/mux, hotspot, niveau de log, reconnexion sont annoncés comme **appliqués à la prochaine connexion** ; gaming et arrière-plan restent explicitement sans effet moteur ; le hotspot précise que les appareils clients doivent configurer le proxy SOCKS manuellement.
+- `UserPreferences.kt` documente le branchement ; rien n'est simulé, aucune revendication sans preuve CI.
+
+### Tests du lot 3
+
+- Unitaires (pur JVM, sans moteur) : `EngineSettingsTest` (7 : défauts identiques au comportement validé, DoH/bootstrap, UDP, plancher de log, replis sûrs, transport des options, rejets) et `XrayConfigBuilderTest` étendu (mux émis/absent, fragment + `dialerProxy`, blackhole + règle, `proxy_only` sans la règle directe mais DNS conservé, inbound SOCKS hotspot, rejets MTU/routage).
+- Par construction, les réglages par défaut produisent une configuration identique aux runs E2E verts du lot 1 (MTU 1500, DNS via override E2E, options désactivées).
 
 ## Implémentation Phase 5 — lot 1 (livrée)
 

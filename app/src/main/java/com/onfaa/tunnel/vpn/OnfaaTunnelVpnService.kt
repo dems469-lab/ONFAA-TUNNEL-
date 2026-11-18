@@ -18,11 +18,13 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.onfaa.tunnel.MainActivity
 import com.onfaa.tunnel.R
+import com.onfaa.tunnel.core.xray.EngineSettings
 import com.onfaa.tunnel.core.xray.XrayBridge
 import com.onfaa.tunnel.core.xray.XrayConfigBuilder
 import com.onfaa.tunnel.core.xray.XrayErrorSanitizer
 import com.onfaa.tunnel.data.config.TunnelConfigRepository
 import com.onfaa.tunnel.domain.model.TunnelProfile
+import com.onfaa.tunnel.onfaaAppContainer
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -31,6 +33,7 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -75,7 +78,6 @@ class OnfaaTunnelVpnService : VpnService() {
         // failure opens a bounded recovery window: the state is Reconnecting
         // (never Connected) until a probe succeeds again.
         private const val HEALTH_CHECK_INTERVAL_MS = 20_000L
-        private const val RECONNECT_DELAY_MS = 5_000L
         private const val RECONNECT_TIMEOUT_MS = 90_000L
     }
 
@@ -149,24 +151,51 @@ class OnfaaTunnelVpnService : VpnService() {
                 throw IllegalStateException("Moteur libXray indisponible dans cette compilation")
             }
 
-            val dnsEndpoint = intent.getStringExtra(EXTRA_DNS_SERVER) ?: DEFAULT_DNS_SERVER
+            val dnsEndpointExtra = intent.getStringExtra(EXTRA_DNS_SERVER)
+            // Engine options come from the persisted user preferences; the
+            // intent DNS extra stays a deterministic override for tests and
+            // deep links. Every value below is really applied to the config.
+            val prefs = applicationContext.onfaaAppContainer.userPreferencesRepository.first()
+            val settings = EngineSettings.from(
+                preferences = prefs,
+                logLevelFloor = if (isDebuggable) "info" else XrayConfigBuilder.DEFAULT_LOG_LEVEL
+            )
+            val dnsEndpoints = dnsEndpointExtra?.let { listOf(it) } ?: settings.dnsEndpoints
             // setDNS expects a plain host:port, without the Xray transport scheme
-            // (tcp://, tcp+local://, udp://) carried by the DNS server config.
-            val resolverEndpoint = dnsEndpoint.substringAfter("://", dnsEndpoint)
+            // (tcp://, tcp+local://, udp://, https://) carried by the DNS config.
+            val bootstrapEndpoint = dnsEndpointExtra ?: settings.bootstrapResolverEndpoint()
+            val resolverEndpoint = bootstrapEndpoint
+                .substringAfter("://", bootstrapEndpoint)
+                .substringBefore('/')
+            TunnelStatusRepository.log(
+                "Options moteur appliquées : MTU ${settings.mtu} · routage ${settings.routingMode} · " +
+                    "DNS ${if (dnsEndpointExtra != null) "override" else settings.dnsEndpoints.first()} · " +
+                    "mux ${if (settings.muxEnabled) "on" else "off"} · " +
+                    "fragmentation ${if (settings.tlsFragment) "on" else "off"} · " +
+                    "adblock ${if (settings.adBlock) "on" else "off"} · " +
+                    "hotspot ${if (settings.hotspotSharing) "on" else "off"}",
+                LogSeverity.INFO
+            )
 
             // Validate with an inert descriptor first (fd 0 is a valid, harmless
             // file in the app process): testXray only constructs handlers and
             // never reads the TUN. The live VPN descriptor is created afterwards.
-            val engineLogLevel = if (isDebuggable) "info" else XrayConfigBuilder.DEFAULT_LOG_LEVEL
+            val engineLogLevel = settings.logLevel
             Log.i(TAG, "Engine mode: ${profile.protocol.name} -> ${profile.endpoint} (log=$engineLogLevel)")
             val validation = XrayBridge.testXray(
                 XrayConfigBuilder.build(
                     profile = profile,
                     tunFd = 0,
-                    dnsEndpoints = listOf(dnsEndpoint),
+                    mtu = settings.mtu,
+                    dnsEndpoints = dnsEndpoints,
                     logLevel = engineLogLevel,
                     injectMode = profile.injectMode,
-                    sni = profile.sni
+                    sni = profile.sni,
+                    routingMode = settings.routingMode,
+                    muxEnabled = settings.muxEnabled,
+                    tlsFragment = settings.tlsFragment,
+                    adBlock = settings.adBlock,
+                    hotspotSharing = settings.hotspotSharing
                 )
             )
             if (!validation.success) {
@@ -175,7 +204,7 @@ class OnfaaTunnelVpnService : VpnService() {
                 )
             }
 
-            val descriptor = buildTun() ?: throw IllegalStateException("Permission VPN refusée par Android")
+            val descriptor = buildTun(settings.mtu) ?: throw IllegalStateException("Permission VPN refusée par Android")
             tun = descriptor
             Log.i(TAG, "TUN established")
             TunnelStatusRepository.set(TunnelState.Connecting)
@@ -207,10 +236,16 @@ class OnfaaTunnelVpnService : VpnService() {
             val config = XrayConfigBuilder.build(
                 profile = profile,
                 tunFd = descriptor.fd,
-                dnsEndpoints = listOf(dnsEndpoint),
+                mtu = settings.mtu,
+                dnsEndpoints = dnsEndpoints,
                 logLevel = engineLogLevel,
                 injectMode = profile.injectMode,
-                sni = profile.sni
+                sni = profile.sni,
+                routingMode = settings.routingMode,
+                muxEnabled = settings.muxEnabled,
+                tlsFragment = settings.tlsFragment,
+                adBlock = settings.adBlock,
+                hotspotSharing = settings.hotspotSharing
             )
 
             val started = XrayBridge.runXray(config)
@@ -228,7 +263,10 @@ class OnfaaTunnelVpnService : VpnService() {
             TunnelStatusRepository.set(TunnelState.Verifying)
             updateNotification("Vérification de la connectivité…")
             val probeUrl = intent.getStringExtra(EXTRA_PROBE_URL) ?: DEFAULT_PROBE_URL
-            val probe = awaitConnectivity(probeUrl)
+            val probe = awaitConnectivity(
+                probeUrl,
+                totalTimeoutMs = prefs.connectionTimeoutSec.coerceIn(5, 120) * 1000L
+            )
             if (!probe.ok && !ConnectivityProbe.isDnsFailure(probe)) {
                 throw IllegalStateException(
                     "Tunnel démarré mais connectivité non vérifiée : ${probe.detail}"
@@ -271,7 +309,12 @@ class OnfaaTunnelVpnService : VpnService() {
             )
             TunnelStatusRepository.log("Connecté avec succès")
             startTrafficSampling()
-            startHealthMonitor(profile, probeUrl)
+            startHealthMonitor(
+                profile,
+                probeUrl,
+                autoReconnect = prefs.autoReconnect,
+                reconnectDelayMs = prefs.reconnectDelaySec.coerceIn(1, 60) * 1000L
+            )
             updateNotification("Connecté — ${profile.displayName}")
         } catch (c: kotlinx.coroutines.CancellationException) {
             teardownEngine()
@@ -307,10 +350,13 @@ class OnfaaTunnelVpnService : VpnService() {
      * the VPN link and its DNS servers, which would resolve through the
      * previous network and fail with NXDOMAIN.
      */
-    private suspend fun awaitConnectivity(url: String): ConnectivityProbe.Result {
+    private suspend fun awaitConnectivity(
+        url: String,
+        totalTimeoutMs: Long = PROBE_TOTAL_TIMEOUT_MS
+    ): ConnectivityProbe.Result {
         var attempt = 1
         var result = ConnectivityProbe.Result(false, "not attempted")
-        val deadline = SystemClock.elapsedRealtime() + PROBE_TOTAL_TIMEOUT_MS
+        val deadline = SystemClock.elapsedRealtime() + totalTimeoutMs
         while (attempt <= PROBE_ATTEMPTS && !destroyed && SystemClock.elapsedRealtime() < deadline) {
             waitForVpnNetwork()
             result = ConnectivityProbe.check(url, timeoutMs = 6_000)
@@ -397,7 +443,12 @@ class OnfaaTunnelVpnService : VpnService() {
         return probe
     }
 
-    private fun startHealthMonitor(profile: TunnelProfile, probeUrl: String) {
+    private fun startHealthMonitor(
+        profile: TunnelProfile,
+        probeUrl: String,
+        autoReconnect: Boolean,
+        reconnectDelayMs: Long
+    ) {
         healthJob?.cancel()
         healthJob = scope.launch {
             while (isActive && !destroyed) {
@@ -414,19 +465,32 @@ class OnfaaTunnelVpnService : VpnService() {
                     "Vérification périodique échouée : ${probe.detail}",
                     LogSeverity.WARNING
                 )
-                awaitRecovery(profile, probeUrl)
+                if (!autoReconnect) {
+                    TunnelStatusRepository.error(
+                        "Tunnel perdu : reconnexion automatique désactivée"
+                    )
+                    lifecycle.withLock { teardownEngine() }
+                    stopForegroundCompat()
+                    stopSelf()
+                    break
+                }
+                awaitRecovery(profile, probeUrl, reconnectDelayMs)
                 if (TunnelStatusRepository.state.value is TunnelState.Error) break
             }
         }
     }
 
-    private suspend fun awaitRecovery(profile: TunnelProfile, probeUrl: String) {
+    private suspend fun awaitRecovery(
+        profile: TunnelProfile,
+        probeUrl: String,
+        reconnectDelayMs: Long
+    ) {
         val deadline = SystemClock.elapsedRealtime() + RECONNECT_TIMEOUT_MS
         var attempt = 1
         TunnelStatusRepository.set(TunnelState.Reconnecting(attempt, profile.displayName))
         updateNotification("Réseau perdu — reconnexion…")
         while (!destroyed && SystemClock.elapsedRealtime() < deadline) {
-            delay(RECONNECT_DELAY_MS)
+            delay(reconnectDelayMs)
             if (destroyed) return
             val probe = verifyTunnel(probeUrl)
             if (probe.ok) {
@@ -468,10 +532,10 @@ class OnfaaTunnelVpnService : VpnService() {
     private val isDebuggable: Boolean
         get() = (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
 
-    private fun buildTun(): ParcelFileDescriptor? {
+    private fun buildTun(mtu: Int): ParcelFileDescriptor? {
         val builder = Builder()
             .setSession("ONFAA TUNNEL")
-            .setMtu(XrayConfigBuilder.DEFAULT_MTU)
+            .setMtu(mtu)
             .addAddress("10.10.0.2", 24)
             .addDnsServer("10.10.0.1")
             .addRoute("0.0.0.0", 0)

@@ -105,4 +105,134 @@ class XrayConfigBuilderTest {
         assertTrue("expected a rejection for a non-Xray transport, got $error", error is IllegalArgumentException)
         assertTrue(error?.message.orEmpty(), error?.message.orEmpty().contains("Transport réseau", ignoreCase = true))
     }
+
+    @Test
+    fun `mux enabled writes real streamSettings mux on the proxy outbound`() {
+        val config = XrayConfigBuilder.build(
+            profile(outboundJson = """{"protocol":"trojan","settings":{"address":"127.0.0.1","port":18445,"password":"pw"}}"""),
+            tunFd = 0,
+            muxEnabled = true
+        )
+        val mux = outboundOf(config).getJSONObject("streamSettings").getJSONObject("mux")
+        assertTrue(mux.getBoolean("enabled"))
+        assertEquals(8, mux.getInt("concurrency"))
+    }
+
+    @Test
+    fun `mux disabled keeps the outbound free of mux settings`() {
+        val config = XrayConfigBuilder.build(
+            profile(outboundJson = """{"protocol":"trojan","settings":{"address":"127.0.0.1","port":18445,"password":"pw"}}"""),
+            tunFd = 0
+        )
+        val stream = outboundOf(config).optJSONObject("streamSettings")
+        assertTrue("no streamSettings expected by default", stream == null || !stream.has("mux"))
+    }
+
+    @Test
+    fun `tls fragment adds a freedom fragment outbound and dials the proxy through it`() {
+        val config = XrayConfigBuilder.build(
+            profile(outboundJson = """{"protocol":"trojan","settings":{"address":"127.0.0.1","port":18445,"password":"pw"}}"""),
+            tunFd = 0,
+            tlsFragment = true
+        )
+        val root = JSONObject(config)
+        assertEquals(
+            "trojan",
+            outboundOf(config).optString("protocol")
+        )
+        assertEquals(XrayConfigBuilder.FRAGMENT_OUTBOUND_TAG, outboundOf(config).getString("dialerProxy"))
+        val fragment = root.getJSONArray("outbounds").let { outbounds ->
+            (0 until outbounds.length())
+                .map { outbounds.getJSONObject(it) }
+                .first { it.getString("tag") == XrayConfigBuilder.FRAGMENT_OUTBOUND_TAG }
+        }
+        val fragmentSettings = fragment.getJSONObject("settings").getJSONObject("fragment")
+        assertEquals("tlshello", fragmentSettings.getString("packets"))
+        assertTrue(fragmentSettings.has("length"))
+        assertTrue(fragmentSettings.has("interval"))
+    }
+
+    @Test
+    fun `ad block routes the embedded ad domains to a blackhole outbound`() {
+        val config = XrayConfigBuilder.build(
+            profile(outboundJson = """{"protocol":"trojan","settings":{"address":"127.0.0.1","port":18445,"password":"pw"}}"""),
+            tunFd = 0,
+            adBlock = true
+        )
+        val root = JSONObject(config)
+        val outbounds = root.getJSONArray("outbounds")
+        val blackhole = (0 until outbounds.length())
+            .map { outbounds.getJSONObject(it) }
+            .first { it.getString("tag") == XrayConfigBuilder.BLOCKED_OUTBOUND_TAG }
+        assertEquals("blackhole", blackhole.getString("protocol"))
+        val firstRule = root.getJSONObject("routing").getJSONArray("rules").getJSONObject(0)
+        assertEquals(XrayConfigBuilder.BLOCKED_OUTBOUND_TAG, firstRule.getString("outboundTag"))
+        assertTrue(firstRule.getJSONArray("domain").length() > 0)
+    }
+
+    @Test
+    fun `proxy only routing drops the private networks direct rule`() {
+        val allConfig = JSONObject(
+            XrayConfigBuilder.build(
+                profile(outboundJson = """{"protocol":"trojan","settings":{"address":"127.0.0.1","port":18445,"password":"pw"}}"""),
+                tunFd = 0,
+                routingMode = EngineSettings.ROUTING_ALL
+            )
+        )
+        val proxyOnlyConfig = JSONObject(
+            XrayConfigBuilder.build(
+                profile(outboundJson = """{"protocol":"trojan","settings":{"address":"127.0.0.1","port":18445,"password":"pw"}}"""),
+                tunFd = 0,
+                routingMode = EngineSettings.ROUTING_PROXY_ONLY
+            )
+        )
+        fun ruleOutboundTags(config: JSONObject): List<String> {
+            val rules = config.getJSONObject("routing").getJSONArray("rules")
+            return (0 until rules.length()).map { rules.getJSONObject(it).optString("outboundTag") }
+        }
+        assertTrue(ruleOutboundTags(allConfig).contains(XrayConfigBuilder.DIRECT_OUTBOUND_TAG))
+        assertTrue(!ruleOutboundTags(proxyOnlyConfig).contains(XrayConfigBuilder.DIRECT_OUTBOUND_TAG))
+        // DNS plumbing must survive in proxy-only mode.
+        assertTrue(ruleOutboundTags(proxyOnlyConfig).contains(XrayConfigBuilder.DNS_OUTBOUND_TAG))
+    }
+
+    @Test
+    fun `hotspot sharing exposes a real local socks inbound`() {
+        val config = XrayConfigBuilder.build(
+            profile(outboundJson = """{"protocol":"trojan","settings":{"address":"127.0.0.1","port":18445,"password":"pw"}}"""),
+            tunFd = 0,
+            hotspotSharing = true
+        )
+        val inbounds = JSONObject(config).getJSONArray("inbounds")
+        val socks = (0 until inbounds.length())
+            .map { inbounds.getJSONObject(it) }
+            .first { it.getString("tag") == XrayConfigBuilder.HOTSPOT_INBOUND_TAG }
+        assertEquals("socks", socks.getString("protocol"))
+        assertEquals(XrayConfigBuilder.HOTSPOT_SOCKS_PORT, socks.getInt("port"))
+        assertEquals("0.0.0.0", socks.getString("listen"))
+    }
+
+    @Test
+    fun `out of range mtu is rejected by the engine boundary`() {
+        val error = runCatching {
+            XrayConfigBuilder.build(
+                profile(outboundJson = """{"protocol":"trojan","settings":{"address":"127.0.0.1","port":18445,"password":"pw"}}"""),
+                tunFd = 0,
+                mtu = 100
+            )
+        }.exceptionOrNull()
+        assertTrue("expected a rejection for MTU 100, got $error", error is IllegalArgumentException)
+    }
+
+    @Test
+    fun `unsupported routing mode is rejected by the engine boundary`() {
+        val error = runCatching {
+            XrayConfigBuilder.build(
+                profile(outboundJson = """{"protocol":"trojan","settings":{"address":"127.0.0.1","port":18445,"password":"pw"}}"""),
+                tunFd = 0,
+                routingMode = "split"
+            )
+        }.exceptionOrNull()
+        assertTrue("expected a rejection for routing mode split, got $error", error is IllegalArgumentException)
+    }
 }

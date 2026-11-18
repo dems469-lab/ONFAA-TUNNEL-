@@ -6,6 +6,15 @@ Le format s’inspire de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/
 
 ## [Unreleased]
 
+### Phase 5 — lot 3 en cours : les réglages « moteur » sont branchés au cœur Xray
+- **Mapping `EngineSettings`** (`core/xray/EngineSettings`) : `UserPreferences` → options réellement exécutables par Xray-core, avec validation et replis sûrs ; plancher de niveau de log jamais abaissé (debug ≥ `info` pour les preuves E2E).
+- **Application réelle par le service** (`OnfaaTunnelVpnService`) : lecture des préférences à chaque connexion, ligne de journal « Options moteur appliquées… » ; DNS/DoH (config `dns` + résolveur bootstrap UDP pour `setDNS`, override `EXTRA_DNS_SERVER` toujours prioritaire), MTU (TUN Android + inbound tun), mux (`streamSettings.mux`, absent si le profil en porte déjà), fragmentation TLS (outbound `freedom` + `fragment` `tlshello` via `dialerProxy`), ad blocker (règle de routage → `blackhole`, 22 domaines embarqués), mode de routage `all`/`bypass_private`/`proxy_only`, hotspot (inbound SOCKS `0.0.0.0:10808`), timeout de connexion (fenêtre de vérification), délai + reconnexion automatique (cycle de vie ; `false` = erreur et arrêt propre immédiats).
+- **Sans équivalent moteur (annoncé honnêtement)** : mode gaming, comportement en arrière-plan — persistés, sans effet, notice à l'appui.
+- **Tests** : `EngineSettingsTest` (7 tests JVM) ; `XrayConfigBuilderTest` étendu (mux, fragment + `dialerProxy`, blackhole, `proxy_only`, inbound hotspot, rejets MTU/routage). Les réglages par défaut reproduisent la configuration validée par les E2E du lot 1.
+- **UI** : notices des sous-écrans Paramètres mises à jour (appliqué « à la prochaine connexion » au lieu de « non raccordé ») ; port SOCKS hotspot documenté.
+- **Version** : `versionCode 6`, `versionName 0.6.0-engine-options`.
+- **Docs** : `README.md` (bandeau + § « Fonctionnement du VPN »), `STATUS.md`.
+
 ### Correctif — l'APK publié par Android CI ne contenait pas le moteur
 
 - **Cause réelle du « VPN non fonctionnel »** : `android.yml` publiait sous le nom `onfaa-tunnel-debug-apk` un APK construit **sans** l'AAR libXray (gitignoré, produit uniquement par le workflow E2E). Vérification sur l'artefact du run #44020633036 : aucun `lib/*/libgojni.so`, aucune classe `libXray.*`. À l'exécution, `XrayBridge.isAvailable()` renvoyait `false` et toute connexion échouait sur « Moteur libXray indisponible dans cette compilation ».
