@@ -50,19 +50,23 @@ object SubscriptionParser {
         // A plain link list always contains "://" so the raw text is returned
         // as-is; only a payload without that marker goes through base64.
         if (text.contains("://")) return text
-        val base64 = text.substringBefore('#')
-            .replace('-', '+')
-            .replace('_', '/')
-            .replace(" ", "")
-        val padded = base64 + "=".repeat((4 - base64.length % 4) % 4)
-        val decoded = try {
-            Base64.getMimeDecoder().decode(padded)
+        // Strict decoding: the MIME decoder silently drops characters that are
+        // not in the base64 alphabet, which would turn a corrupted payload
+        // into unreadable garbage instead of a readable failure. Whitespace
+        // is removed first (some providers wrap base64), then the URL-safe
+        // alphabet is normalized to the standard one and the padding is
+        // restored before the strict decode.
+        val compact = text.replace(Regex("\\s"), "")
+        val normalized = compact.replace('-', '+').replace('_', '/')
+        val padded = normalized + "=".repeat((4 - normalized.length % 4) % 4)
+        val bytes = try {
+            Base64.getDecoder().decode(padded)
         } catch (failure: IllegalArgumentException) {
             throw SubscriptionException(
                 "Abonnement illisible : ni une liste de liens, ni un bloc base64 valide"
             )
         }
-        val decodedText = String(decoded, Charsets.UTF_8)
+        val decodedText = String(bytes, Charsets.UTF_8)
         if (decodedText.isBlank()) {
             throw SubscriptionException("Abonnement décodé vide")
         }
