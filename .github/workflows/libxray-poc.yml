@@ -228,6 +228,11 @@ jobs:
           openssl x509 -in "$E2E_DIR/trojan.crt" -outform DER \
             | sha256sum | awk '{print $1}' > "$E2E_DIR/pcs.txt"
           test -s "$E2E_DIR/pcs.txt"
+          # Xray 26 freedom blocks private IPs by default for proxy inbounds
+          # (defaultBlockPrivateRule), so the DNS responder on 127.0.0.1 is
+          # explicitly allowed for the DNS-over-TCP port. Without it the DNS
+          # through the tunnel scenario is blackholed server-side, exactly as
+          # observed in xray-server.log ("target blocked by a finalrule").
           cat > "$E2E_DIR/server.json" <<EOF
           {
             "log": {"loglevel": "info", "access": "$E2E_DIR/access.log"},
@@ -293,7 +298,20 @@ jobs:
               ]
             },
             "outbounds": [
-              {"protocol": "freedom", "tag": "direct"},
+              {
+                "protocol": "freedom",
+                "tag": "direct",
+                "settings": {
+                  "finalRules": [
+                    {
+                      "action": "allow",
+                      "network": "tcp",
+                      "ip": ["127.0.0.1"],
+                      "port": "$E2E_DNS_PORT"
+                    }
+                  ]
+                }
+              },
               {
                 "protocol": "freedom",
                 "tag": "token-redirect",
