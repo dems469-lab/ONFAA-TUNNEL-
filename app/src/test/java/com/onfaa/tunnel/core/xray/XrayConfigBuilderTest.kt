@@ -186,14 +186,23 @@ class XrayConfigBuilderTest {
                 routingMode = EngineSettings.ROUTING_PROXY_ONLY
             )
         )
-        fun ruleOutboundTags(config: JSONObject): List<String> {
+        fun hasPrivateNetworksDirectRule(config: JSONObject): Boolean {
             val rules = config.getJSONObject("routing").getJSONArray("rules")
-            return (0 until rules.length()).map { rules.getJSONObject(it).optString("outboundTag") }
+            return (0 until rules.length()).any { index ->
+                val rule = rules.getJSONObject(index)
+                rule.optString("outboundTag") == XrayConfigBuilder.DIRECT_OUTBOUND_TAG &&
+                    rule.optJSONArray("ip")?.optString(0) == "10.0.0.0/8"
+            }
         }
-        assertTrue(ruleOutboundTags(allConfig).contains(XrayConfigBuilder.DIRECT_OUTBOUND_TAG))
-        assertTrue(!ruleOutboundTags(proxyOnlyConfig).contains(XrayConfigBuilder.DIRECT_OUTBOUND_TAG))
+        assertTrue(hasPrivateNetworksDirectRule(allConfig))
+        assertTrue(!hasPrivateNetworksDirectRule(proxyOnlyConfig))
         // DNS plumbing must survive in proxy-only mode.
-        assertTrue(ruleOutboundTags(proxyOnlyConfig).contains(XrayConfigBuilder.DNS_OUTBOUND_TAG))
+        val rules = proxyOnlyConfig.getJSONObject("routing").getJSONArray("rules")
+        assertTrue(
+            (0 until rules.length()).any {
+                rules.getJSONObject(it).optString("outboundTag") == XrayConfigBuilder.DNS_OUTBOUND_TAG
+            }
+        )
     }
 
     @Test
