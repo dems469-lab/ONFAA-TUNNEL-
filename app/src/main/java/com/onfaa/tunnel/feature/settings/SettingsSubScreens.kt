@@ -1,5 +1,6 @@
 package com.onfaa.tunnel.feature.settings
 
+import android.content.Context
 import android.content.Intent
 import android.os.Build
 import androidx.compose.foundation.background

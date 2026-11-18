@@ -1,7 +1,6 @@
 package com.onfaa.tunnel.data.subscription
 
 import com.onfaa.tunnel.core.xray.ConfigImporter
-import com.onfaa.tunnel.core.xray.ConfigImporter
 import java.net.HttpURLConnection
 import java.net.URL
 import kotlinx.coroutines.Dispatchers
