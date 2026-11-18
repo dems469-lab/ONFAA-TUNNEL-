@@ -59,6 +59,7 @@ class OnfaaTunnelVpnService : VpnService() {
         const val EXTRA_SHARE_LINK = "com.onfaa.tunnel.extra.SHARE_LINK"
         const val EXTRA_DNS_SERVER = "com.onfaa.tunnel.extra.DNS_SERVER"
         const val EXTRA_PROBE_URL = "com.onfaa.tunnel.extra.PROBE_URL"
+        const val EXTRA_DNS_VIA_PROXY = "com.onfaa.tunnel.extra.DNS_VIA_PROXY"
 
         const val DEFAULT_DNS_SERVER = XrayConfigBuilder.DEFAULT_RESOLVER_ENDPOINT
 
@@ -163,15 +164,29 @@ class OnfaaTunnelVpnService : VpnService() {
             )
             val appFilter = AppFilter.from(prefs)
             val dnsEndpoints = dnsEndpointExtra?.let { listOf(it) } ?: settings.dnsEndpoints
+            // Production resolution goes through the tunnel: on censored
+            // networks a direct reach to public resolvers (DoH included) is
+            // dropped or hijacked, which used to leave the tunnel up but every
+            // name unresolvable. An explicit DNS override (tests, deep links)
+            // keeps the direct path unless the caller asks otherwise, so the
+            // deterministic CI fixture stays untouched.
+            val dnsViaProxy = intent.getBooleanExtra(EXTRA_DNS_VIA_PROXY, dnsEndpointExtra == null)
             // setDNS expects a plain host:port, without the Xray transport scheme
             // (tcp://, tcp+local://, udp://, https://) carried by the DNS config.
-            val bootstrapEndpoint = dnsEndpointExtra ?: settings.bootstrapResolverEndpoint()
+            // It is only the bootstrap resolver for the proxy server's own
+            // hostname (before any tunnel exists), so prefer a resolver the
+            // device can really reach.
+            val bootstrapEndpoint = dnsEndpointExtra
+                ?: systemBootstrapEndpoint()
+                ?: settings.bootstrapResolverEndpoint()
             val resolverEndpoint = bootstrapEndpoint
                 .substringAfter("://", bootstrapEndpoint)
                 .substringBefore('/')
             TunnelStatusRepository.log(
                 "Options moteur appliquées : MTU ${settings.mtu} · routage ${settings.routingMode} · " +
-                    "DNS ${if (dnsEndpointExtra != null) "override" else settings.dnsEndpoints.first()} · " +
+                    "DNS ${if (dnsEndpointExtra != null) "override" else settings.dnsEndpoints.first()} " +
+                    "(${if (dnsViaProxy) "via tunnel" else "direct"}) · " +
+                    "bootstrap ${XrayErrorSanitizer.sanitize(resolverEndpoint)} · " +
                     "mux ${if (settings.muxEnabled) "on" else "off"} · " +
                     "fragmentation ${if (settings.tlsFragment) "on" else "off"} · " +
                     "adblock ${if (settings.adBlock) "on" else "off"} · " +
@@ -198,7 +213,8 @@ class OnfaaTunnelVpnService : VpnService() {
                     muxEnabled = settings.muxEnabled,
                     tlsFragment = settings.tlsFragment,
                     adBlock = settings.adBlock,
-                    hotspotSharing = settings.hotspotSharing
+                    hotspotSharing = settings.hotspotSharing,
+                    dnsViaProxy = dnsViaProxy
                 )
             )
             if (!validation.success) {
@@ -256,7 +272,8 @@ class OnfaaTunnelVpnService : VpnService() {
                 muxEnabled = settings.muxEnabled,
                 tlsFragment = settings.tlsFragment,
                 adBlock = settings.adBlock,
-                hotspotSharing = settings.hotspotSharing
+                hotspotSharing = settings.hotspotSharing,
+                dnsViaProxy = dnsViaProxy
             )
 
             val started = XrayBridge.runXray(config)
@@ -581,6 +598,26 @@ class OnfaaTunnelVpnService : VpnService() {
 
     private val isDebuggable: Boolean
         get() = (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+
+    /**
+     * Resolver used only to resolve the proxy server's own hostname, before
+     * any tunnel exists. Carrier/Wi-Fi resolvers keep answering on networks
+     * that drop or hijack public ones; when the platform publishes none, the
+     * configured default stays in place. Never used for user traffic.
+     */
+    private fun systemBootstrapEndpoint(): String? {
+        val manager = getSystemService(ConnectivityManager::class.java) ?: return null
+        for (network in manager.allNetworks) {
+            val capabilities = manager.getNetworkCapabilities(network) ?: continue
+            if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) continue
+            if (!capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) continue
+            val properties = manager.getLinkProperties(network) ?: continue
+            val address = properties.dnsServers.firstOrNull()?.hostAddress ?: continue
+            if (address.isBlank()) continue
+            return if (address.contains(':')) "[$address]:53" else "$address:53"
+        }
+        return null
+    }
 
     private fun buildTun(mtu: Int, appFilter: AppFilter.Settings): ParcelFileDescriptor? {
         val builder = Builder()

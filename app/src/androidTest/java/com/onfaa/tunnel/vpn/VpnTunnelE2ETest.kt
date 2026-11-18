@@ -133,6 +133,35 @@ class VpnTunnelE2ETest {
     }
 
     /**
+     * Production DNS path: the engine's own resolver queries are routed through
+     * the proxy instead of being dialed directly (`tcp+local://` in the other
+     * scenarios). The responder here is addressed as 127.0.0.1 on the server
+     * side, so a successful resolution can only come from the query travelling
+     * client -> tunnel -> server -> resolver. This is the exact behaviour that
+     * censored networks need, where direct public resolvers are dropped.
+     */
+    @Test
+    fun dnsResolutionTravelsThroughTheTunnelWhenEnabled() {
+        val port = dns.substringAfterLast(':')
+        val proxiedDns = "tcp://127.0.0.1:$port"
+        assertDirectTrafficFails()
+        sendConnect(vlessLink(), dnsOverride = proxiedDns, dnsViaProxy = true)
+        awaitCondition(90_000, "tunnel did not connect with DNS through the proxy") {
+            TunnelStatusRepository.state.value is TunnelState.Connected
+        }
+        assertEquals("192.0.2.10", InetAddress.getByName("onfaa.test").hostAddress)
+        val byName = httpGet(dnsProbeUrl(), 15_000)
+        assertEquals(200, byName.first)
+        assertEquals(token, byName.second.trim())
+        sendAction(OnfaaTunnelVpnService.ACTION_DISCONNECT)
+        awaitCondition(20_000, "tunnel did not stop") {
+            TunnelStatusRepository.state.value is TunnelState.Idle
+        }
+        assertFalse(runBlocking { XrayBridge.getXrayState() })
+        assertDirectTrafficFails()
+    }
+
+    /**
      * Real per-application split tunneling, allowed side: the test app is the
      * only package allowed into the VPN. If the filter were not applied by the
      * platform builder, nothing would change; if it were applied wrongly
@@ -150,26 +179,29 @@ class VpnTunnelE2ETest {
     }
 
     /**
-     * Real per-application split tunneling, excluded side: the test app is
-     * excluded from the VPN. The tunnel itself still connects, but this app's
-     * sockets bypass it, so the fixture (reachable only through the tunnel)
-     * must become unreachable from the test process — the observable,
-     * honest proof that addDisallowedApplication was really applied.
+     * Real per-application split tunneling, excluded side. The test app — and
+     * therefore the VPN service living in the same UID — is excluded from its
+     * own tunnel, so the service's verification sockets bypass the VPN and
+     * cannot reach the fixture that exists only behind it. Honest expected
+     * outcome: the engine really starts, but the service must report an error
+     * instead of a fake Connected. The control is every other scenario (same
+     * profile, filter off): it reaches the fixture, so the platform-level
+     * exclusion is the only difference.
      */
     @Test
     fun blockSelfBypassesTheTunnelForThisApp() {
         setAppFilter(AppFilter.MODE_BLOCK, listOf(context.packageName))
         try {
             sendConnect(vlessLink())
-            awaitCondition(90_000, "tunnel did not connect") {
-                TunnelStatusRepository.state.value is TunnelState.Connected
+            awaitCondition(90_000, "excluded app must not report a connected tunnel") {
+                TunnelStatusRepository.state.value is TunnelState.Error
             }
+            val error = TunnelStatusRepository.state.value as TunnelState.Error
+            assertTrue("the failure must explain itself", error.message.isNotBlank())
+            assertFalse(runBlocking { XrayBridge.getXrayState() })
             val bypassed = runCatching { httpGet(probeUrl, 3_000) }
             assertTrue("excluded app reached the fixture directly: $bypassed", bypassed.isFailure)
-            sendAction(OnfaaTunnelVpnService.ACTION_DISCONNECT)
-            awaitCondition(20_000, "tunnel did not stop") {
-                TunnelStatusRepository.state.value is TunnelState.Idle
-            }
+            awaitConditionOrNull(10_000) { TunnelStatusRepository.state.value is TunnelState.Idle }
         } finally {
             setAppFilter(AppFilter.MODE_OFF, emptyList())
         }
@@ -232,12 +264,19 @@ class VpnTunnelE2ETest {
         assertTrue("direct request unexpectedly succeeded: $direct", direct.isFailure)
     }
 
-    private fun sendConnect(link: String) {
+    private fun sendConnect(
+        link: String,
+        dnsOverride: String = dns,
+        dnsViaProxy: Boolean? = null
+    ) {
         val intent = Intent(context, OnfaaTunnelVpnService::class.java)
             .setAction(OnfaaTunnelVpnService.ACTION_CONNECT)
             .putExtra(OnfaaTunnelVpnService.EXTRA_SHARE_LINK, link)
-            .putExtra(OnfaaTunnelVpnService.EXTRA_DNS_SERVER, dns)
+            .putExtra(OnfaaTunnelVpnService.EXTRA_DNS_SERVER, dnsOverride)
             .putExtra(OnfaaTunnelVpnService.EXTRA_PROBE_URL, probeUrl)
+        if (dnsViaProxy != null) {
+            intent.putExtra(OnfaaTunnelVpnService.EXTRA_DNS_VIA_PROXY, dnsViaProxy)
+        }
         ContextCompat.startForegroundService(context, intent)
     }
 

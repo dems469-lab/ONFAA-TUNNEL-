@@ -206,6 +206,34 @@ class XrayConfigBuilderTest {
     }
 
     @Test
+    fun `dns queries follow the proxy when dns via proxy is enabled`() {
+        fun dnsRuleTarget(config: JSONObject): String {
+            val rules = config.getJSONObject("routing").getJSONArray("rules")
+            return (0 until rules.length())
+                .map { rules.getJSONObject(it) }
+                .first { rule ->
+                    rule.optJSONArray("inboundTag")?.optString(0) == XrayConfigBuilder.DNS_QUERY_TAG
+                }
+                .optString("outboundTag")
+        }
+        val directConfig = JSONObject(
+            XrayConfigBuilder.build(
+                profile(outboundJson = """{"protocol":"trojan","settings":{"address":"127.0.0.1","port":18445,"password":"pw"}}"""),
+                tunFd = 0
+            )
+        )
+        val proxiedConfig = JSONObject(
+            XrayConfigBuilder.build(
+                profile(outboundJson = """{"protocol":"trojan","settings":{"address":"127.0.0.1","port":18445,"password":"pw"}}"""),
+                tunFd = 0,
+                dnsViaProxy = true
+            )
+        )
+        assertEquals(XrayConfigBuilder.DIRECT_OUTBOUND_TAG, dnsRuleTarget(directConfig))
+        assertEquals(XrayConfigBuilder.PROXY_OUTBOUND_TAG, dnsRuleTarget(proxiedConfig))
+    }
+
+    @Test
     fun `hotspot sharing exposes a real local socks inbound`() {
         val config = XrayConfigBuilder.build(
             profile(outboundJson = """{"protocol":"trojan","settings":{"address":"127.0.0.1","port":18445,"password":"pw"}}"""),

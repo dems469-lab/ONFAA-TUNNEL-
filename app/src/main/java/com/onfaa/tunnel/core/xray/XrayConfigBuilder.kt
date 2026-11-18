@@ -103,7 +103,8 @@ object XrayConfigBuilder {
         muxEnabled: Boolean = false,
         tlsFragment: Boolean = false,
         adBlock: Boolean = false,
-        hotspotSharing: Boolean = false
+        hotspotSharing: Boolean = false,
+        dnsViaProxy: Boolean = false
     ): String {
         require(profile.protocol in SUPPORTED_PROTOCOLS) {
             "Unsupported protocol: ${profile.protocol}"
@@ -241,10 +242,15 @@ object XrayConfigBuilder {
             .put("inboundTag", JSONArray().put(TUN_INBOUND_TAG))
             .put("port", "53")
             .put("outboundTag", DNS_OUTBOUND_TAG))
+        // Queries issued by the engine's own DNS module carry the DNS tag as
+        // inbound tag, so this rule decides where resolution really happens.
+        // Sent direct (freedom) by default; with [dnsViaProxy] they travel
+        // through the tunnel like the user traffic, which is the only way DNS
+        // survives networks that block or hijack public resolvers.
         rules.put(JSONObject()
             .put("type", "field")
             .put("inboundTag", JSONArray().put(DNS_QUERY_TAG))
-            .put("outboundTag", DIRECT_OUTBOUND_TAG))
+            .put("outboundTag", if (dnsViaProxy) PROXY_OUTBOUND_TAG else DIRECT_OUTBOUND_TAG))
         if (routingMode != EngineSettings.ROUTING_PROXY_ONLY) {
             rules.put(JSONObject()
                 .put("type", "field")
